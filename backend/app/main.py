@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.db import get_cash_balance, get_positions, get_watchlist, init_db, insert_snapshot
 from app.market import PriceCache, create_market_data_source, create_stream_router
-from app.routes import chat, portfolio, watchlist
+from app.routes import analysis, chat, portfolio, watchlist
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +78,7 @@ app = FastAPI(title="FinAlly", lifespan=lifespan)
 app.include_router(portfolio.router)
 app.include_router(watchlist.router)
 app.include_router(chat.router)
+app.include_router(analysis.router)
 
 # SSE streaming — uses the module-level price_cache
 stream_router = create_stream_router(price_cache)
