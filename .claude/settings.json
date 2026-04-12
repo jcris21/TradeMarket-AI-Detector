@@ -1,7 +1,14 @@
 {
-  "enabledPlugins": {
-    "frontend-design@claude-plugins-official": true,
-    "context7@claude-plugins-official": true,
-    "playwright@claude-plugins-official": true
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd /c/Users/ASUS/Documents/ProyectosNoCode/Vibe_EngineerExpert_Project/finally && git diff HEAD > planning/REVIEW_HOOK.md 2>&1"
+          }
+        ]
+      }
+    ]
   }
 }
