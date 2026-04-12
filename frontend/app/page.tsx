@@ -12,6 +12,7 @@ import PortfolioHeatmap from "@/components/PortfolioHeatmap";
 import PnlChart from "@/components/PnlChart";
 import TradeBar from "@/components/TradeBar";
 import ChatPanel from "@/components/ChatPanel";
+import OpportunitiesPanel from "@/components/OpportunitiesPanel";
 
 async function fetchPortfolio(setter: (p: Portfolio) => void) {
   try {
@@ -36,6 +37,7 @@ export default function Home() {
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
   const [userSelectedTicker, setUserSelectedTicker] = useState<string | null>(null);
+  const [chatInjectedMessage, setChatInjectedMessage] = useState<string | null>(null);
 
   // Derive the effective selected ticker: user selection, or first watchlist item
   const selectedTicker = useMemo(() => {
@@ -99,8 +101,16 @@ export default function Home() {
             </div>
           </div>
 
+          {/* Opportunities Panel */}
+          <div className="h-48 border-t border-border shrink-0">
+            <OpportunitiesPanel
+              onTickerSelect={setUserSelectedTicker}
+              onInjectChat={setChatInjectedMessage}
+            />
+          </div>
+
           {/* Bottom row: Positions + P&L Chart */}
-          <div className="h-[40%] flex border-t border-border min-h-0">
+          <div className="h-[35%] flex border-t border-border min-h-0">
             <div className="flex-1 border-r border-border min-w-0">
               <PositionsTable positions={portfolio?.positions ?? []} />
             </div>
@@ -112,7 +122,11 @@ export default function Home() {
 
         {/* Right column: Chat panel */}
         <div className="w-80 shrink-0">
-          <ChatPanel onTradeExecuted={refreshAll} />
+          <ChatPanel
+            onTradeExecuted={refreshAll}
+            injectedMessage={chatInjectedMessage}
+            onInjectedMessageConsumed={() => setChatInjectedMessage(null)}
+          />
         </div>
       </div>
     </div>

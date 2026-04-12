@@ -91,3 +91,38 @@ export interface ChatResponse {
 
 /** Connection status for SSE */
 export type ConnectionStatus = "connected" | "connecting" | "disconnected";
+
+/** Technical analysis signal */
+export type AnalysisSignal = "BUY" | "WAIT" | "AVOID";
+
+/** Single asset analysis result */
+export interface AssetAnalysis {
+  ticker: string;
+  signal: AnalysisSignal;
+  confidence: number;
+  entry_price: number;
+  target_price: number;
+  stop_loss: number;
+  risk_reward_ratio: number;
+  support_validated: boolean;
+  indicators_summary: Record<string, unknown>;
+  argument: string;
+  score: number | null;
+  rank: number | null;
+  analyzed_at?: string;
+}
+
+/** Response from POST /api/analysis/run */
+export interface AnalysisRunResponse {
+  run_id: string;
+  analyzed_at: string;
+  duration_seconds: number;
+  top_5: AssetAnalysis[];
+  assets: AssetAnalysis[];
+  errors: Array<{ ticker: string; error_message: string }>;
+}
+
+/** Response from GET /api/analysis/latest */
+export interface AnalysisLatestResponse {
+  results: AssetAnalysis[];
+}

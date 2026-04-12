@@ -1,15 +1,17 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatMessage } from "@/lib/types";
 import { sendChatMessage } from "@/lib/api";
 import { formatPrice } from "@/lib/format";
 
 interface ChatPanelProps {
   onTradeExecuted: () => void;
+  injectedMessage?: string | null;
+  onInjectedMessageConsumed?: () => void;
 }
 
-export default function ChatPanel({ onTradeExecuted }: ChatPanelProps) {
+export default function ChatPanel({ onTradeExecuted, injectedMessage, onInjectedMessageConsumed }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -19,6 +21,13 @@ export default function ChatPanel({ onTradeExecuted }: ChatPanelProps) {
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages]);
+
+  useEffect(() => {
+    if (injectedMessage) {
+      setInput(injectedMessage);
+      onInjectedMessageConsumed?.();
+    }
+  }, [injectedMessage, onInjectedMessageConsumed]);
 
   async function handleSend() {
     const text = input.trim();

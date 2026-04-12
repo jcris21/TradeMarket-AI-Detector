@@ -6,6 +6,9 @@ import type {
   PortfolioSnapshot,
   ChatResponse,
   ChatMessage,
+  AnalysisRunResponse,
+  AnalysisLatestResponse,
+  AssetAnalysis,
 } from "./types";
 
 const BASE = "/api";
@@ -109,4 +112,34 @@ export async function sendChatMessage(message: string): Promise<ChatResponse> {
 
 export async function getHealth(): Promise<{ status: string }> {
   return request<{ status: string }>("/health");
+}
+
+export async function runAnalysis(tickers?: string[]): Promise<AnalysisRunResponse> {
+  return request<AnalysisRunResponse>("/analysis/run", {
+    method: "POST",
+    body: JSON.stringify({ tickers: tickers ?? null }),
+  });
+}
+
+export async function getLatestAnalysis(): Promise<AnalysisLatestResponse> {
+  return request<AnalysisLatestResponse>("/analysis/latest");
+}
+
+export async function getTickerAnalysis(ticker: string): Promise<AssetAnalysis> {
+  return request<AssetAnalysis>(`/analysis/${ticker}`);
+}
+
+export async function getAnalysisTickers(): Promise<{ tickers: string[] }> {
+  return request<{ tickers: string[] }>("/analysis/tickers");
+}
+
+export async function addAnalysisTicker(ticker: string): Promise<void> {
+  await request("/analysis/tickers", {
+    method: "POST",
+    body: JSON.stringify({ ticker }),
+  });
+}
+
+export async function removeAnalysisTicker(ticker: string): Promise<void> {
+  await request(`/analysis/tickers/${ticker}`, { method: "DELETE" });
 }
