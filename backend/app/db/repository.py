@@ -289,3 +289,140 @@ async def get_chat_history(limit: int = 50, user_id: str = DEFAULT_USER_ID) -> l
         return [dict(row) for row in reversed(rows)]
     finally:
         await db.close()
+
+
+# --- Analysis Tickers ---
+
+
+async def get_analysis_tickers(user_id: str = DEFAULT_USER_ID) -> list[str]:
+    """Get the list of tickers configured for analysis."""
+    db = await get_connection()
+    try:
+        cursor = await db.execute(
+            "SELECT ticker FROM analysis_tickers WHERE user_id = ? ORDER BY added_at",
+            (user_id,),
+        )
+        rows = await cursor.fetchall()
+        return [row["ticker"] for row in rows]
+    finally:
+        await db.close()
+
+
+async def add_analysis_ticker(ticker: str, user_id: str = DEFAULT_USER_ID) -> bool:
+    """Add a ticker to the analysis list. Returns True if added, False if already present."""
+    ticker = ticker.upper()
+    db = await get_connection()
+    try:
+        cursor = await db.execute(
+            "SELECT id FROM analysis_tickers WHERE user_id = ? AND ticker = ?",
+            (user_id, ticker),
+        )
+        if await cursor.fetchone():
+            return False
+        await db.execute(
+            "INSERT INTO analysis_tickers (id, user_id, ticker, added_at) VALUES (?, ?, ?, ?)",
+            (_uuid(), user_id, ticker, _now()),
+        )
+        await db.commit()
+        return True
+    finally:
+        await db.close()
+
+
+async def remove_analysis_ticker(ticker: str, user_id: str = DEFAULT_USER_ID) -> bool:
+    """Remove a ticker from the analysis list. Returns True if removed."""
+    ticker = ticker.upper()
+    db = await get_connection()
+    try:
+        cursor = await db.execute(
+            "DELETE FROM analysis_tickers WHERE user_id = ? AND ticker = ?",
+            (user_id, ticker),
+        )
+        await db.commit()
+        return cursor.rowcount > 0
+    finally:
+        await db.close()
+
+
+# --- Analysis Results ---
+
+
+async def save_analysis_results(
+    rows: list[dict], user_id: str = DEFAULT_USER_ID
+) -> None:
+    """Persist a batch of analysis results. Each dict matches analysis_results columns."""
+    db = await get_connection()
+    try:
+        for row in rows:
+            await db.execute(
+                "INSERT INTO analysis_results "
+                "(id, user_id, run_id, ticker, rank, score, signal, confidence, "
+                "risk_reward_ratio, entry_price, target_price, stop_loss, "
+                "support_validated, argument, indicators_summary, screenshot_path, analyzed_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    _uuid(),
+                    user_id,
+                    row["run_id"],
+                    row["ticker"],
+                    row.get("rank"),
+                    row.get("score"),
+                    row.get("signal"),
+                    row.get("confidence"),
+                    row.get("risk_reward_ratio"),
+                    row.get("entry_price"),
+                    row.get("target_price"),
+                    row.get("stop_loss"),
+                    1 if row.get("support_validated") else 0,
+                    row.get("argument"),
+                    row.get("indicators_summary"),
+                    row.get("screenshot_path"),
+                    _now(),
+                ),
+            )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+async def get_latest_analysis(user_id: str = DEFAULT_USER_ID) -> list[dict]:
+    """Return all rows from the most recent analysis run, ordered by rank."""
+    db = await get_connection()
+    try:
+        cursor = await db.execute(
+            "SELECT run_id FROM analysis_results WHERE user_id = ? "
+            "ORDER BY analyzed_at DESC LIMIT 1",
+            (user_id,),
+        )
+        row = await cursor.fetchone()
+        if not row:
+            return []
+        run_id = row["run_id"]
+
+        cursor = await db.execute(
+            "SELECT * FROM analysis_results WHERE user_id = ? AND run_id = ? "
+            "ORDER BY CASE WHEN rank IS NULL THEN 999 ELSE rank END",
+            (user_id, run_id),
+        )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        await db.close()
+
+
+async def get_analysis_by_ticker(
+    ticker: str, user_id: str = DEFAULT_USER_ID
+) -> dict | None:
+    """Return the most recent analysis result for a specific ticker."""
+    ticker = ticker.upper()
+    db = await get_connection()
+    try:
+        cursor = await db.execute(
+            "SELECT * FROM analysis_results WHERE user_id = ? AND ticker = ? "
+            "ORDER BY analyzed_at DESC LIMIT 1",
+            (user_id, ticker),
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+    finally:
+        await db.close()

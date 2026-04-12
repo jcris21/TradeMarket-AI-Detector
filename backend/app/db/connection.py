@@ -65,6 +65,14 @@ async def init_db() -> None:
                     (str(uuid.uuid4()), DEFAULT_USER_ID, ticker, now),
                 )
 
+            # Seed default analysis tickers (same as watchlist)
+            for ticker in DEFAULT_TICKERS:
+                await db.execute(
+                    "INSERT OR IGNORE INTO analysis_tickers (id, user_id, ticker, added_at) "
+                    "VALUES (?, ?, ?, ?)",
+                    (str(uuid.uuid4()), DEFAULT_USER_ID, ticker, now),
+                )
+
             await db.commit()
     finally:
         await db.close()

@@ -50,6 +50,34 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     actions TEXT,
     created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS analysis_results (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL DEFAULT 'default',
+    run_id TEXT NOT NULL,
+    ticker TEXT NOT NULL,
+    rank INTEGER,
+    score REAL,
+    signal TEXT,
+    confidence REAL,
+    risk_reward_ratio REAL,
+    entry_price REAL,
+    target_price REAL,
+    stop_loss REAL,
+    support_validated INTEGER NOT NULL DEFAULT 0,
+    argument TEXT,
+    indicators_summary TEXT,
+    screenshot_path TEXT,
+    analyzed_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS analysis_tickers (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL DEFAULT 'default',
+    ticker TEXT NOT NULL,
+    added_at TEXT NOT NULL,
+    UNIQUE(user_id, ticker)
+);
 """
 
 DEFAULT_TICKERS = ["AAPL", "GOOGL", "MSFT", "AMZN", "TSLA", "NVDA", "META", "JPM", "V", "NFLX"]

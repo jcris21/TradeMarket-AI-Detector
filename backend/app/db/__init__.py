@@ -24,14 +24,25 @@ Public API:
 
     insert_chat_message  - Store a chat message
     get_chat_history     - Get recent chat history
+
+    get_analysis_tickers    - List tickers for analysis
+    add_analysis_ticker     - Add a ticker to analysis list
+    remove_analysis_ticker  - Remove a ticker from analysis list
+    save_analysis_results   - Persist analysis results batch
+    get_latest_analysis     - Get most recent analysis run results
+    get_analysis_by_ticker  - Get latest analysis for a specific ticker
 """
 
 from .connection import get_connection, init_db, set_db_path
 from .repository import (
+    add_analysis_ticker,
     add_to_watchlist,
     delete_position,
+    get_analysis_by_ticker,
+    get_analysis_tickers,
     get_cash_balance,
     get_chat_history,
+    get_latest_analysis,
     get_portfolio_history,
     get_position,
     get_positions,
@@ -39,7 +50,9 @@ from .repository import (
     insert_chat_message,
     insert_snapshot,
     insert_trade,
+    remove_analysis_ticker,
     remove_from_watchlist,
+    save_analysis_results,
     update_cash_balance,
     upsert_position,
 )
@@ -63,6 +76,12 @@ __all__ = [
     "get_portfolio_history",
     "insert_chat_message",
     "get_chat_history",
+    "add_analysis_ticker",
+    "get_analysis_tickers",
+    "get_analysis_by_ticker",
+    "get_latest_analysis",
+    "remove_analysis_ticker",
+    "save_analysis_results",
     "DEFAULT_USER_ID",
     "DEFAULT_TICKERS",
     "DEFAULT_CASH_BALANCE",
