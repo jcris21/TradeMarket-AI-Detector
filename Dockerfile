@@ -19,6 +19,9 @@ WORKDIR /app/backend
 COPY backend/pyproject.toml backend/uv.lock backend/README.md ./
 RUN uv sync --frozen --no-dev
 
+# Install Playwright Chromium and its system dependencies
+RUN uv run playwright install chromium --with-deps
+
 # Copy backend source
 COPY backend/ ./
 
