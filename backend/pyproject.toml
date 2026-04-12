@@ -12,6 +12,10 @@ dependencies = [
     "rich>=13.0.0",
     "aiosqlite>=0.22.1",
     "litellm>=1.81.10",
+    "yfinance>=0.2.50",
+    "pandas-ta>=0.3.14b",
+    "playwright>=1.40.0",
+    "pydantic>=2.0.0",
 ]
 
 [project.optional-dependencies]
