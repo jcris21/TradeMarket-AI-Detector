@@ -1,5 +1,6 @@
 """CRUD operations for all database tables."""
 
+import json
 import uuid
 from datetime import datetime, timezone
 
@@ -385,6 +386,18 @@ async def save_analysis_results(
         await db.close()
 
 
+def _parse_analysis_row(row) -> dict:
+    """Convert a DB analysis_results row to a frontend-compatible dict."""
+    d = dict(row)
+    raw = d.get("indicators_summary")
+    if isinstance(raw, str):
+        try:
+            d["indicators_summary"] = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            d["indicators_summary"] = {}
+    return d
+
+
 async def get_latest_analysis(user_id: str = DEFAULT_USER_ID) -> list[dict]:
     """Return all rows from the most recent analysis run, ordered by rank."""
     db = await get_connection()
@@ -405,7 +418,7 @@ async def get_latest_analysis(user_id: str = DEFAULT_USER_ID) -> list[dict]:
             (user_id, run_id),
         )
         rows = await cursor.fetchall()
-        return [dict(r) for r in rows]
+        return [_parse_analysis_row(r) for r in rows]
     finally:
         await db.close()
 
@@ -423,6 +436,6 @@ async def get_analysis_by_ticker(
             (user_id, ticker),
         )
         row = await cursor.fetchone()
-        return dict(row) if row else None
+        return _parse_analysis_row(row) if row else None
     finally:
         await db.close()

@@ -23,11 +23,11 @@ _ANALYSIS = AssetAnalysis(
 
 
 @patch.dict(os.environ, {"PLAYWRIGHT_MOCK": "true"})
-@patch("app.analysis.orchestrator.fetch_indicators", new_callable=AsyncMock)
+@patch("app.analysis.orchestrator.fetch_indicators_batch", new_callable=AsyncMock)
 @patch("app.analysis.orchestrator.analyze_asset", new_callable=AsyncMock)
 @patch("app.analysis.orchestrator.save_analysis_results", new_callable=AsyncMock)
 async def test_run_analysis_returns_analysis_result(mock_save, mock_vision, mock_data):
-    mock_data.return_value = _INDICATORS
+    mock_data.return_value = {"NVDA": _INDICATORS}
     mock_vision.return_value = _ANALYSIS.model_copy(update={"rank": 1, "score": 88.0})
 
     result = await run_analysis(["NVDA"])
@@ -39,12 +39,15 @@ async def test_run_analysis_returns_analysis_result(mock_save, mock_vision, mock
 
 
 @patch.dict(os.environ, {"PLAYWRIGHT_MOCK": "true"})
-@patch("app.analysis.orchestrator.fetch_indicators", new_callable=AsyncMock)
+@patch("app.analysis.orchestrator.fetch_indicators_batch", new_callable=AsyncMock)
 @patch("app.analysis.orchestrator.analyze_asset", new_callable=AsyncMock)
 @patch("app.analysis.orchestrator.save_analysis_results", new_callable=AsyncMock)
 async def test_data_fetch_error_is_isolated(mock_save, mock_vision, mock_data):
     """A DataFetchError for one ticker should not abort the whole run."""
-    mock_data.side_effect = [DataFetchError("FAKE"), _INDICATORS]
+    mock_data.return_value = {
+        "FAKE": DataFetchError("FAKE"),
+        "NVDA": _INDICATORS,
+    }
     mock_vision.return_value = _ANALYSIS
 
     result = await run_analysis(["FAKE", "NVDA"])
@@ -55,11 +58,11 @@ async def test_data_fetch_error_is_isolated(mock_save, mock_vision, mock_data):
 
 
 @patch.dict(os.environ, {"PLAYWRIGHT_MOCK": "true"})
-@patch("app.analysis.orchestrator.fetch_indicators", new_callable=AsyncMock)
+@patch("app.analysis.orchestrator.fetch_indicators_batch", new_callable=AsyncMock)
 @patch("app.analysis.orchestrator.analyze_asset", new_callable=AsyncMock)
 @patch("app.analysis.orchestrator.save_analysis_results", new_callable=AsyncMock)
 async def test_duration_seconds_is_positive(mock_save, mock_vision, mock_data):
-    mock_data.return_value = _INDICATORS
+    mock_data.return_value = {"NVDA": _INDICATORS}
     mock_vision.return_value = _ANALYSIS
 
     result = await run_analysis(["NVDA"])

@@ -5,12 +5,12 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 
 from app.db import get_cash_balance, get_positions, get_watchlist, init_db, insert_snapshot
 from app.market import PriceCache, create_market_data_source, create_stream_router
-from app.routes import analysis, chat, portfolio, watchlist
+from app.routes import analysis, chat, market, portfolio, watchlist
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +79,7 @@ app.include_router(portfolio.router)
 app.include_router(watchlist.router)
 app.include_router(chat.router)
 app.include_router(analysis.router)
+app.include_router(market.router)
 
 # SSE streaming — uses the module-level price_cache
 stream_router = create_stream_router(price_cache)
@@ -88,6 +89,21 @@ app.include_router(stream_router)
 @app.get("/api/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/api/debug/cache")
+async def debug_cache(request: Request):
+    import os
+    cache = getattr(request.app.state, "price_cache", None)
+    source = getattr(request.app.state, "market_source", None)
+    prices = cache.get_all() if cache else {}
+    return {
+        "cache_set": cache is not None,
+        "source_type": type(source).__name__ if source else None,
+        "massive_api_key": repr(os.environ.get("MASSIVE_API_KEY", "NOT_SET")),
+        "price_count": len(prices),
+        "sample": {k: round(v.price, 2) for k, v in list(prices.items())[:3]},
+    }
 
 
 # Static files serving (frontend) — mount last so API routes take priority

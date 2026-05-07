@@ -5,28 +5,16 @@ import logging
 import time
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 from app.db import save_analysis_results
 
-from .data_agent import fetch_indicators
-from .models import AnalysisResult, AssetAnalysis, DataFetchError, TechnicalIndicators
+from .data_agent import fetch_indicators_batch
+from .models import AnalysisResult, AssetAnalysis, TechnicalIndicators
 from .scoring_agent import score_and_rank
-from .screenshot_agent import capture_charts
 from .vision_agent import analyze_asset
 
 logger = logging.getLogger(__name__)
-
-
-async def _fetch_one(ticker: str) -> tuple[str, TechnicalIndicators | None, str | None]:
-    """Fetch indicators for one ticker. Returns (ticker, result_or_None, error_or_None)."""
-    try:
-        indicators = await fetch_indicators(ticker)
-        return ticker, indicators, None
-    except DataFetchError as exc:
-        return ticker, None, str(exc)
-    except Exception as exc:
-        logger.warning("Unexpected error fetching %s: %s", ticker, exc)
-        return ticker, None, str(exc)
 
 
 async def run_analysis(tickers: list[str]) -> AnalysisResult:
@@ -38,17 +26,16 @@ async def run_analysis(tickers: list[str]) -> AnalysisResult:
     start = time.monotonic()
     errors: list[dict] = []
 
-    # Stage 1: Parallel indicator fetch
-    logger.info("Stage 1: fetching indicators for %d tickers", len(tickers))
-    fetch_tasks = [_fetch_one(t) for t in tickers]
-    fetch_results = await asyncio.gather(*fetch_tasks)
+    # Stage 1: Batch indicator fetch (single yfinance call avoids thread-safety race)
+    logger.info("Stage 1: batch-fetching indicators for %d tickers", len(tickers))
+    batch_results = await fetch_indicators_batch(tickers)
 
     successful: dict[str, TechnicalIndicators] = {}
-    for ticker, indicators, error in fetch_results:
-        if indicators is not None:
-            successful[ticker] = indicators
+    for ticker, result in batch_results.items():
+        if isinstance(result, Exception):
+            errors.append({"ticker": ticker, "error_message": str(result)})
         else:
-            errors.append({"ticker": ticker, "error_message": error or "Unknown error"})
+            successful[ticker] = result
 
     if not successful:
         return AnalysisResult(
@@ -60,14 +47,15 @@ async def run_analysis(tickers: list[str]) -> AnalysisResult:
             duration_seconds=round(time.monotonic() - start, 2),
         )
 
-    # Stage 2: Sequential screenshots (single Playwright session)
-    logger.info("Stage 2: capturing screenshots for %d tickers", len(successful))
+    # Stage 2: Load pre-captured screenshots from the screenshots folder
+    logger.info("Stage 2: loading pre-captured screenshots for %d tickers", len(successful))
+    screenshots_dir = Path(__file__).parents[3] / "screenshots"
     screenshots: dict[str, bytes | None] = {}
-    try:
-        screenshots = await capture_charts(list(successful.keys()))
-    except Exception as exc:
-        logger.error("Screenshot capture failed: %s", exc)
-        screenshots = {t: None for t in successful}
+    for ticker in successful:
+        png = screenshots_dir / f"{ticker}.png"
+        screenshots[ticker] = png.read_bytes() if png.exists() else None
+    loaded = sum(1 for v in screenshots.values() if v is not None)
+    logger.info("Loaded %d/%d screenshots from %s", loaded, len(successful), screenshots_dir)
 
     # Stage 3: Parallel vision analysis
     logger.info("Stage 3: running vision analysis for %d tickers", len(successful))

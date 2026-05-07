@@ -1,5 +1,6 @@
 """Database connection management with lazy initialization."""
 
+import json
 import os
 import uuid
 from datetime import datetime, timezone
@@ -7,6 +8,68 @@ from datetime import datetime, timezone
 import aiosqlite
 
 from .schema import DEFAULT_CASH_BALANCE, DEFAULT_TICKERS, DEFAULT_USER_ID, SCHEMA_SQL
+
+# ── Mock analysis seed ────────────────────────────────────────────────────────
+# GOOGL: confidence=0.88, rr=4.8, 3/3 indicators → score 88.20 (Rank 1)
+# AMZN:  confidence=0.74, rr=3.3, 2/3 indicators → score 65.52 (Rank 2)
+# Scores verified against scoring_agent._compute_score() formula:
+#   score = confidence×40 + min(rr/6,1)×100×0.35 + confluence×0.25
+_MOCK_ANALYSIS_SEED = [
+    {
+        "ticker": "GOOGL",
+        "rank": 1,
+        "score": 88.2,
+        "signal": "BUY",
+        "confidence": 0.88,
+        "risk_reward_ratio": 4.8,
+        "entry_price": 178.50,
+        "target_price": 208.54,
+        "stop_loss": 172.20,
+        "support_validated": 1,
+        "argument": (
+            "GOOGL muestra un cruce alcista de MACD con histograma positivo creciente, "
+            "RSI en zona de sobreventa técnica (44.2) con espacio para subida, y volumen "
+            "1.45× sobre la media — confluencia de 3/3 indicadores. El soporte S1 en "
+            "$172.20 está validado visualmente en el gráfico. Ratio riesgo/beneficio de "
+            "4.8:1 desde entrada $178.50 hasta resistencia $208.54."
+        ),
+        "indicators_summary": json.dumps({
+            "macd": "bullish_crossover",
+            "rsi": 44.2,
+            "volume": 1.45,
+            "macd_histogram": 0.82,
+            "support_1": 172.20,
+            "resistance_1": 208.54,
+        }),
+    },
+    {
+        "ticker": "AMZN",
+        "rank": 2,
+        "score": 65.52,
+        "signal": "BUY",
+        "confidence": 0.74,
+        "risk_reward_ratio": 3.3,
+        "entry_price": 198.20,
+        "target_price": 223.61,
+        "stop_loss": 190.50,
+        "support_validated": 1,
+        "argument": (
+            "AMZN presenta cruce alcista de MACD y RSI neutral-positivo (52.1), pero el "
+            "volumen está por debajo de la media (0.98×) lo que reduce la convicción "
+            "— confluencia parcial 2/3. Soporte S1 en $190.50 identificado en los últimos "
+            "20 períodos. Ratio riesgo/beneficio de 3.3:1, por encima del mínimo requerido "
+            "pero inferior a GOOGL."
+        ),
+        "indicators_summary": json.dumps({
+            "macd": "bullish_crossover",
+            "rsi": 52.1,
+            "volume": 0.98,
+            "macd_histogram": 0.41,
+            "support_1": 190.50,
+            "resistance_1": 223.61,
+        }),
+    },
+]
 
 _DB_PATH: str | None = None
 
@@ -71,6 +134,38 @@ async def init_db() -> None:
                     "INSERT OR IGNORE INTO analysis_tickers (id, user_id, ticker, added_at) "
                     "VALUES (?, ?, ?, ?)",
                     (str(uuid.uuid4()), DEFAULT_USER_ID, ticker, now),
+                )
+
+            # Seed mock analysis results so the UI renders on first launch
+            seed_run_id = str(uuid.uuid4())
+            for row in _MOCK_ANALYSIS_SEED:
+                await db.execute(
+                    """
+                    INSERT INTO analysis_results (
+                        id, user_id, run_id, ticker, rank, score, signal, confidence,
+                        risk_reward_ratio, entry_price, target_price, stop_loss,
+                        support_validated, argument, indicators_summary,
+                        screenshot_path, analyzed_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+                    """,
+                    (
+                        str(uuid.uuid4()),
+                        DEFAULT_USER_ID,
+                        seed_run_id,
+                        row["ticker"],
+                        row["rank"],
+                        row["score"],
+                        row["signal"],
+                        row["confidence"],
+                        row["risk_reward_ratio"],
+                        row["entry_price"],
+                        row["target_price"],
+                        row["stop_loss"],
+                        row["support_validated"],
+                        row["argument"],
+                        row["indicators_summary"],
+                        now,
+                    ),
                 )
 
             await db.commit()

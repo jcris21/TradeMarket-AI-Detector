@@ -2,11 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a multi-agent technical analysis pipeline that fetches indicators via yfinance, captures investing.com chart screenshots via Playwright, analyzes them with LLM vision, and surfaces Top 5 buy opportunities (≥3:1 R/R) in a dedicated frontend panel.
+**Goal:** Add a multi-agent technical analysis pipeline that fetches indicators via yfinance, loads pre-captured chart screenshots from disk, analyzes them with LLM vision, and surfaces Top 5 buy opportunities (≥3:1 R/R) in a dedicated frontend panel.
 
-**Architecture:** OrchestratorAgent coordinates 4 stages: parallel DataAgent calls (yfinance + pandas-ta) → sequential ScreenshotAgent (single Playwright session) → parallel VisionAgent calls (LiteLLM vision) → ScoringAgent (filter + rank). Results cached in SQLite, served via 6 new API endpoints.
+**Architecture:** OrchestratorAgent coordinates 4 stages: parallel DataAgent calls (yfinance + pandas-ta) → disk load of pre-captured PNGs from `finally/screenshots/` → parallel VisionAgent calls (LiteLLM vision) → ScoringAgent (filter + rank). Results cached in SQLite, served via 6 new API endpoints.
 
-**Tech Stack:** yfinance, pandas-ta, playwright (async), litellm (vision), aiosqlite, FastAPI, Next.js/TypeScript
+**Tech Stack:** yfinance, pandas-ta, litellm (vision), aiosqlite, FastAPI, Next.js/TypeScript
+
+> **MVP change:** `screenshot_agent.py` removed. Stage 2 loads `finally/screenshots/{TICKER}.png` from disk. No Playwright, no investing.com credentials needed.
 
 **Spec:** `docs/superpowers/specs/2026-04-11-technical-analysis-multiagent-design.md`
 **Agents contract:** `planning/AGENTS.md`
@@ -19,20 +21,18 @@
 - `backend/app/analysis/__init__.py`
 - `backend/app/analysis/models.py`
 - `backend/app/analysis/data_agent.py`
-- `backend/app/analysis/screenshot_agent.py`
 - `backend/app/analysis/vision_agent.py`
 - `backend/app/analysis/scoring_agent.py`
 - `backend/app/analysis/orchestrator.py`
 - `backend/app/routes/analysis.py`
 - `backend/tests/analysis/__init__.py`
 - `backend/tests/analysis/test_data_agent.py`
-- `backend/tests/analysis/test_screenshot_agent.py`
 - `backend/tests/analysis/test_vision_agent.py`
 - `backend/tests/analysis/test_scoring_agent.py`
 - `backend/tests/analysis/test_orchestrator.py`
 
 **Modified backend files:**
-- `backend/pyproject.toml` — add yfinance, pandas-ta, playwright, pydantic
+- `backend/pyproject.toml` — add yfinance, pandas-ta, pydantic
 - `backend/app/db/schema.py` — add analysis_results, analysis_tickers SQL
 - `backend/app/db/connection.py` — seed analysis_tickers in init_db()
 - `backend/app/db/repository.py` — add analysis CRUD functions
@@ -50,7 +50,7 @@
 - `frontend/app/page.tsx` — add OpportunitiesPanel
 
 **Infrastructure:**
-- `Dockerfile` — add playwright chromium install
+- ~~`Dockerfile` — playwright chromium install~~ *(removed for MVP — no Playwright dependency)*
 
 ---
 
@@ -80,7 +80,6 @@ dependencies = [
     "litellm>=1.81.10",
     "yfinance>=0.2.50",
     "pandas-ta>=0.3.14b",
-    "playwright>=1.40.0",
     "pydantic>=2.0.0",
 ]
 ```
@@ -90,15 +89,14 @@ dependencies = [
 ```bash
 cd backend
 uv sync --extra dev
-playwright install chromium
 ```
 
-Expected: dependencies install without error. Playwright installs Chromium browser.
+Expected: dependencies install without error.
 
 - [ ] **Step 3: Verify imports work**
 
 ```bash
-uv run python -c "import yfinance; import pandas_ta; from playwright.async_api import async_playwright; print('OK')"
+uv run python -c "import yfinance; import pandas_ta; print('OK')"
 ```
 
 Expected output: `OK`
@@ -107,7 +105,7 @@ Expected output: `OK`
 
 ```bash
 git add backend/pyproject.toml backend/uv.lock
-git commit -m "feat: add yfinance, pandas-ta, playwright dependencies for analysis module"
+git commit -m "feat: add yfinance, pandas-ta dependencies for analysis module"
 ```
 
 ---
@@ -928,277 +926,23 @@ git commit -m "feat: add DataAgent with yfinance + pandas-ta indicator computati
 
 ---
 
-## Task 6: ScreenshotAgent
+## Task 6: Pre-captured Screenshots (MVP)
 
-**Files:**
-- Create: `backend/app/analysis/screenshot_agent.py`
-- Create: `backend/tests/analysis/test_screenshot_agent.py`
+> **Note:** `screenshot_agent.py` was removed for the MVP. Stage 2 loads PNGs from disk.
+> No Playwright, no investing.com credentials. This task is complete — no implementation needed.
 
-- [ ] **Step 1: Write failing tests**
+**Convention:** Place PNG files at `finally/screenshots/{TICKER}.png` (e.g., `AAPL.png`).
+If a file is missing, the VisionAgent receives `None` and proceeds with numeric data only.
 
-Create `backend/tests/analysis/test_screenshot_agent.py`:
-
-```python
-"""Tests for ScreenshotAgent — Playwright screenshot capture."""
-
-import os
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
-
-from app.analysis.models import InvestingComAuthError
-from app.analysis.screenshot_agent import capture_charts
-
-
-@pytest.fixture
-def mock_page():
-    page = AsyncMock()
-    page.screenshot = AsyncMock(return_value=b"\x89PNG\r\n")
-    page.goto = AsyncMock()
-    page.wait_for_load_state = AsyncMock()
-    page.wait_for_selector = AsyncMock()
-    page.click = AsyncMock()
-    page.fill = AsyncMock()
-    return page
-
-
-@pytest.fixture
-def mock_playwright_ctx(mock_page):
-    browser = AsyncMock()
-    context = AsyncMock()
-    context.new_page = AsyncMock(return_value=mock_page)
-    browser.new_context = AsyncMock(return_value=context)
-
-    chromium = MagicMock()
-    chromium.launch = AsyncMock(return_value=browser)
-
-    pw = AsyncMock()
-    pw.__aenter__ = AsyncMock(return_value=pw)
-    pw.__aexit__ = AsyncMock(return_value=None)
-    pw.chromium = chromium
-    return pw
-
-
-@patch.dict(os.environ, {"PLAYWRIGHT_MOCK": "true"})
-async def test_mock_mode_returns_png_bytes_for_all_tickers():
-    result = await capture_charts(["AAPL", "MSFT"])
-    assert set(result.keys()) == {"AAPL", "MSFT"}
-    for v in result.values():
-        assert isinstance(v, bytes)
-        assert len(v) > 0
-
-
-@patch.dict(os.environ, {"PLAYWRIGHT_MOCK": ""})
-@patch.dict(os.environ, {"INVESTING_COM_EMAIL": "", "INVESTING_COM_PASSWORD": ""})
-async def test_missing_credentials_raises_auth_error():
-    with pytest.raises(InvestingComAuthError):
-        await capture_charts(["AAPL"])
-
-
-@patch.dict(os.environ, {"PLAYWRIGHT_MOCK": ""})
-@patch.dict(os.environ, {
-    "INVESTING_COM_EMAIL": "test@example.com",
-    "INVESTING_COM_PASSWORD": "pass"
-})
-@patch("app.analysis.screenshot_agent.async_playwright")
-async def test_login_failure_raises_auth_error(mock_pw_factory, mock_playwright_ctx, mock_page):
-    # Simulate login form not found
-    mock_page.wait_for_selector = AsyncMock(side_effect=Exception("Timeout"))
-    mock_playwright_ctx.chromium.launch = AsyncMock(
-        return_value=AsyncMock(new_context=AsyncMock(return_value=AsyncMock(new_page=AsyncMock(return_value=mock_page))))
-    )
-    mock_pw_factory.return_value = mock_playwright_ctx
-
-    with pytest.raises(InvestingComAuthError):
-        await capture_charts(["AAPL"])
-```
-
-- [ ] **Step 2: Run to verify failure**
-
-```bash
-cd backend
-uv run --extra dev pytest tests/analysis/test_screenshot_agent.py -v
-```
-
-Expected: FAIL — module not found.
-
-- [ ] **Step 3: Implement screenshot_agent.py**
-
-Create `backend/app/analysis/screenshot_agent.py`:
+- [x] **Step 1: Screenshots loaded from disk in orchestrator.py** — already implemented.
 
 ```python
-"""ScreenshotAgent — captures investing.com chart screenshots via Playwright."""
-
-import logging
-import os
-
-from playwright.async_api import async_playwright
-
-from .models import InvestingComAuthError
-
-logger = logging.getLogger(__name__)
-
-# Minimal 1x1 transparent PNG for mock mode
-_MOCK_PNG = (
-    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
-    b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00"
-    b"\x00\x01\x01\x00\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82"
-)
-
-# investing.com slug mapping for default tickers
-_TICKER_SLUGS: dict[str, str] = {
-    "AAPL": "apple-computer-inc",
-    "GOOGL": "alphabet-inc",
-    "MSFT": "microsoft-corp",
-    "AMZN": "amazon-com-inc",
-    "TSLA": "tesla-motors",
-    "NVDA": "nvidia-corp",
-    "META": "meta-platforms-inc",
-    "JPM": "jpmorgan-chase",
-    "V": "visa",
-    "NFLX": "netflix-inc",
+screenshots_dir = Path(__file__).parents[3] / "screenshots"
+screenshots = {
+    ticker: (screenshots_dir / f"{ticker}.png").read_bytes()
+    if (screenshots_dir / f"{ticker}.png").exists() else None
+    for ticker in tickers
 }
-
-_CHART_INTERVAL_MAP = {
-    "1D": "1D",
-    "1W": "1W",
-    "1M": "1M",
-}
-
-SCREENSHOT_TIMEOUT = 30_000  # ms
-
-
-async def _login(page) -> None:
-    """Log in to investing.com. Raises InvestingComAuthError on failure."""
-    email = os.environ.get("INVESTING_COM_EMAIL", "")
-    password = os.environ.get("INVESTING_COM_PASSWORD", "")
-    if not email or not password:
-        raise InvestingComAuthError("INVESTING_COM_EMAIL and INVESTING_COM_PASSWORD must be set")
-
-    try:
-        await page.goto("https://www.investing.com/", wait_until="domcontentloaded", timeout=30_000)
-        # Accept cookies if banner present
-        try:
-            await page.click("#onetrust-accept-btn-handler", timeout=5_000)
-        except Exception:
-            pass
-
-        # Open sign-in form
-        await page.click('[data-test="sign-in-btn"]', timeout=10_000)
-        await page.wait_for_selector('input[name="email"]', timeout=10_000)
-        await page.fill('input[name="email"]', email)
-        await page.fill('input[name="password"]', password)
-        await page.click('[data-test="submit-btn"]', timeout=10_000)
-        # Wait for login to complete (user menu appears)
-        await page.wait_for_selector('[data-test="user-menu"]', timeout=15_000)
-        logger.info("Logged in to investing.com")
-    except InvestingComAuthError:
-        raise
-    except Exception as exc:
-        raise InvestingComAuthError(f"Login failed: {exc}") from exc
-
-
-async def _get_slug(page, ticker: str) -> str | None:
-    """Return the investing.com URL slug for a ticker, or None if not found."""
-    if ticker in _TICKER_SLUGS:
-        return _TICKER_SLUGS[ticker]
-    # Attempt search for unknown tickers
-    try:
-        await page.goto(
-            f"https://www.investing.com/search/?q={ticker}",
-            wait_until="domcontentloaded",
-            timeout=15_000,
-        )
-        await page.wait_for_selector(".js-inner-all-results-quote-item", timeout=8_000)
-        href = await page.get_attribute(".js-inner-all-results-quote-item a", "href")
-        if href and "/equities/" in href:
-            return href.split("/equities/")[1].split("?")[0].rstrip("/")
-    except Exception:
-        pass
-    return None
-
-
-async def _capture_one(page, ticker: str, interval: str) -> bytes | None:
-    """Navigate to a ticker chart page and return a screenshot, or None on failure."""
-    slug = await _get_slug(page, ticker)
-    if slug is None:
-        logger.warning("No slug found for %s — skipping screenshot", ticker)
-        return None
-
-    try:
-        url = f"https://www.investing.com/equities/{slug}"
-        await page.goto(url, wait_until="domcontentloaded", timeout=SCREENSHOT_TIMEOUT)
-
-        # Set chart interval if controls are visible
-        try:
-            interval_label = _CHART_INTERVAL_MAP.get(interval, "1D")
-            await page.click(f'[data-period="{interval_label}"]', timeout=5_000)
-        except Exception:
-            pass
-
-        await page.wait_for_load_state("networkidle", timeout=SCREENSHOT_TIMEOUT)
-
-        # Screenshot the chart canvas area
-        chart_el = await page.query_selector("#technicalChart, canvas.chart-canvas, #chart")
-        if chart_el:
-            screenshot = await chart_el.screenshot(timeout=SCREENSHOT_TIMEOUT)
-        else:
-            # Fall back to full viewport screenshot
-            screenshot = await page.screenshot(full_page=False, timeout=SCREENSHOT_TIMEOUT)
-
-        logger.debug("Captured screenshot for %s (%d bytes)", ticker, len(screenshot))
-        return screenshot
-
-    except Exception as exc:
-        logger.warning("Screenshot failed for %s: %s", ticker, exc)
-        return None
-
-
-async def capture_charts(
-    tickers: list[str],
-    interval: str | None = None,
-) -> dict[str, bytes | None]:
-    """Capture chart screenshots for all tickers in a single Playwright session.
-
-    If PLAYWRIGHT_MOCK=true, returns dummy PNG bytes without launching a browser.
-    Raises InvestingComAuthError if credentials are missing or login fails.
-    Returns dict[ticker, bytes | None] — None when a ticker's screenshot failed.
-    """
-    if os.environ.get("PLAYWRIGHT_MOCK", "").lower() == "true":
-        return {t: _MOCK_PNG for t in tickers}
-
-    chart_interval = interval or os.environ.get("INVESTING_COM_CHART_INTERVAL", "1D")
-
-    async with async_playwright() as pw:
-        browser = await pw.chromium.launch(headless=True)
-        context = await browser.new_context(viewport={"width": 1440, "height": 900})
-        page = await context.new_page()
-
-        await _login(page)
-
-        results: dict[str, bytes | None] = {}
-        for ticker in tickers:
-            results[ticker] = await _capture_one(page, ticker, chart_interval)
-
-        await browser.close()
-
-    return results
-```
-
-- [ ] **Step 4: Run tests**
-
-```bash
-cd backend
-uv run --extra dev pytest tests/analysis/test_screenshot_agent.py -v
-```
-
-Expected: 3 tests PASS.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add backend/app/analysis/screenshot_agent.py backend/tests/analysis/test_screenshot_agent.py
-git commit -m "feat: add ScreenshotAgent with Playwright investing.com integration + mock mode"
 ```
 
 ---
@@ -1782,7 +1526,6 @@ from app.db import save_analysis_results
 from .data_agent import fetch_indicators
 from .models import AnalysisResult, AssetAnalysis, DataFetchError, TechnicalIndicators
 from .scoring_agent import score_and_rank
-from .screenshot_agent import capture_charts
 from .vision_agent import analyze_asset
 
 logger = logging.getLogger(__name__)
@@ -1957,8 +1700,8 @@ async def trigger_analysis(body: RunRequest):
         result = await run_analysis(tickers)
     except InvestingComAuthError as exc:
         raise HTTPException(
-            status_code=503,
-            detail=f"Could not connect to investing.com: {exc}. Check INVESTING_COM_EMAIL and INVESTING_COM_PASSWORD in .env",
+            status_code=500,
+            detail=f"Analysis pipeline failed: {exc}",
         )
 
     return {
@@ -2666,8 +2409,7 @@ WORKDIR /app/backend
 COPY backend/pyproject.toml backend/uv.lock backend/README.md ./
 RUN uv sync --frozen --no-dev
 
-# Install Playwright Chromium and its system dependencies
-RUN uv run playwright install chromium --with-deps
+# No Playwright install needed — screenshots are pre-loaded from finally/screenshots/
 
 # Copy backend source
 COPY backend/ ./
@@ -2696,7 +2438,7 @@ Expected: build succeeds. Note: Chromium install adds ~500MB to image.
 
 ```bash
 git add Dockerfile
-git commit -m "feat: add playwright chromium install to Dockerfile for screenshot capture"
+git commit -m "feat: update Dockerfile for analysis module (no Playwright needed)"
 ```
 
 ---
@@ -2722,13 +2464,6 @@ LLM_MOCK=false
 
 # Optional: Set to "true" to skip Playwright browser launch (testing)
 PLAYWRIGHT_MOCK=false
-
-# Required for technical analysis chart screenshots
-INVESTING_COM_EMAIL=your@email.com
-INVESTING_COM_PASSWORD=yourpassword
-
-# Optional: Chart timeframe for investing.com screenshots (1D, 1W, 1M)
-INVESTING_COM_CHART_INTERVAL=1D
 
 # Optional: Minimum risk/reward ratio to qualify (default: 3.0)
 ANALYSIS_MIN_RR_RATIO=3.0

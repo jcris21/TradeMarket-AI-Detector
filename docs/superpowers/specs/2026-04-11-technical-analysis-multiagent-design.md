@@ -57,8 +57,8 @@ POST /api/analysis/run
 │  Stage 1 — asyncio.gather (parallel, all tickers)        │
 │  └── DataAgent × N → MACD, RSI, Volume, pivot points     │
 │                                                           │
-│  Stage 2 — sequential (single Playwright browser session) │
-│  └── ScreenshotAgent → dict[ticker, screenshot_bytes]    │
+│  Stage 2 — synchronous disk load (pre-captured PNGs)      │
+│  └── Load finally/screenshots/{TICKER}.png → dict        │
 │                                                           │
 │  Stage 3 — asyncio.gather (parallel, all tickers)        │
 │  └── VisionAgent × N → signals, S/R validated, argument  │
@@ -79,11 +79,12 @@ backend/app/analysis/
 ├── __init__.py
 ├── models.py           # Pydantic: TechnicalIndicators, AssetAnalysis, AnalysisResult
 ├── data_agent.py       # yfinance fetch + pandas-ta: MACD, RSI, Volume, pivot points
-├── screenshot_agent.py # Playwright → investing.com login → chart screenshots
 ├── vision_agent.py     # LiteLLM vision call → structured AssetAnalysis output
 ├── scoring_agent.py    # Filter R/R ≥ 3.0, score formula, rank Top 5
 └── orchestrator.py     # Coordinates 4 stages, per-asset error isolation
 ```
+
+> **MVP note:** `screenshot_agent.py` was removed. Stage 2 loads pre-captured PNGs from `finally/screenshots/{TICKER}.png`. Place screenshots there before running analysis.
 
 ---
 
@@ -118,25 +119,27 @@ class TechnicalIndicators:
 
 ---
 
-## 5. Screenshot Agent
+## 5. Pre-captured Screenshots (MVP)
 
-**Tool:** Playwright (async, headless Chromium).
+**Approach:** Screenshots are loaded from disk instead of captured at runtime via Playwright.
 
-**Flow:**
-1. Launch single `chromium` instance (headless)
-2. Login to investing.com once using `INVESTING_COM_EMAIL` / `INVESTING_COM_PASSWORD`
-3. For each ticker, navigate to the equity page, set chart interval (`INVESTING_COM_CHART_INTERVAL`, default `1D`), wait for `networkidle`, capture screenshot of chart region
-4. Close browser, return `dict[str, bytes]`
+**Location:** `finally/screenshots/{TICKER}.png` (e.g., `AAPL.png`, `MSFT.png`)
+
+**Flow in orchestrator (Stage 2):**
+```python
+screenshots_dir = Path(__file__).parents[3] / "screenshots"
+screenshots = {
+    ticker: (screenshots_dir / f"{ticker}.png").read_bytes()
+    if (screenshots_dir / f"{ticker}.png").exists() else None
+    for ticker in tickers
+}
+```
 
 **Error handling:**
-- Ticker not found on investing.com → log warning, pass `None` screenshot; VisionAgent proceeds with numeric data only
-- Login failure → raise `InvestingComAuthError`; orchestrator returns HTTP 503 with descriptive message
-- Per-ticker timeout (30s) → skip screenshot for that ticker, continue
+- Missing PNG for a ticker → `None` passed to VisionAgent; it proceeds with numeric data only and sets `support_validated = False`
+- No Playwright dependency, no credentials required, no network calls in Stage 2
 
-**Dockerfile addition (Stage 2 / Python):**
-```dockerfile
-RUN playwright install chromium --with-deps
-```
+> **Future:** If live screenshot capture is re-enabled, restore `screenshot_agent.py` with Playwright + camoufox and update Stage 2 in `orchestrator.py` accordingly. The `INVESTING_COM_EMAIL` / `INVESTING_COM_PASSWORD` env vars and the Dockerfile `playwright install` step would also need to be re-added.
 
 ---
 
@@ -184,6 +187,93 @@ indicator_confluence = count of bullish signals / 3 × 100  # MACD + RSI + Volum
 ```
 
 **Output:** Sorted list of up to 5 `AssetAnalysis` objects with assigned ranks. Assets not meeting minimum R/R are included in the full response with `rank: null` so the frontend can optionally show them with a "Did not qualify" badge.
+
+---
+
+### 7.1 Cálculo del R/R Ratio
+
+El ratio riesgo/beneficio se calcula a partir de tres precios definidos en el momento del análisis:
+
+```
+R/R = (target_price - entry_price) / (entry_price - stop_loss)
+```
+
+| Variable | Fuente | Descripción |
+|---|---|---|
+| `entry_price` | `TechnicalIndicators.current_price` | Precio de mercado en el momento del análisis |
+| `target_price` | Resistencia R1 validada por VisionAgent | Primer nivel de resistencia de los últimos 20 períodos, confirmado visualmente en el gráfico |
+| `stop_loss` | Soporte S1 validado por VisionAgent | Primer nivel de soporte de los últimos 20 períodos, confirmado visualmente en el gráfico |
+
+**Ejemplo con GOOGL del seed:**
+```
+entry  = $178.50
+target = $208.54  →  recorrido alcista = $30.04
+stop   = $172.20  →  riesgo asumido   =  $6.30
+
+R/R = 30.04 / 6.30 = 4.77 ≈ 4.8
+```
+
+El VisionAgent es responsable de validar que los niveles S1/R1 calculados numéricamente por el DataAgent sean visibles y respetados en el gráfico — si no lo son, `support_validated = False` y el asset recibe una penalización en el filtro de calificación.
+
+---
+
+### 7.2 Por qué el umbral mínimo es 3:1 y el cap de normalización es 6:1
+
+Estos dos números tienen **roles distintos** en el pipeline:
+
+#### Umbral mínimo: `ANALYSIS_MIN_RR_RATIO = 3.0` (variable de entorno)
+
+Es la **puerta de entrada** — cualquier asset con R/R < 3.0 queda descalificado y no recibe rank, independientemente de su confianza o confluencia de indicadores.
+
+**Justificación del 3:1 como apetito de riesgo aceptable:**
+- En trading técnico, un mínimo de 2:1 es el estándar básico para que la estrategia sea matemáticamente viable con una tasa de acierto del 50 %. A 3:1 se puede ser rentable con solo el 40 % de operaciones ganadoras.
+- El 3:1 como piso refleja el apetito de riesgo configurado: *"Solo me interesan oportunidades donde el beneficio potencial triplica el riesgo asumido."*
+- Es configurable via `ANALYSIS_MIN_RR_RATIO` para que el usuario pueda subir (más selectivo) o bajar (más permisivo) según su perfil.
+
+#### Cap de normalización: `6:1`
+
+Es el **techo de excelencia** para el componente de scoring — marca el punto a partir del cual un R/R mayor no añade puntuación extra.
+
+**Justificación del 6:1 como cap:**
+- Un R/R de 6:1 implica que el target está muy lejos del entry, lo que en la práctica suele señalar que el target está en una resistencia estructural más débil o que el setup tiene baja probabilidad de completarse.
+- Penalizar implícitamente los R/R excesivos evita que un asset con R/R=10:1 (poco realista) desplace a uno con R/R=4:1 + alta confianza + 3/3 indicadores.
+- El rango útil de R/R en análisis técnico de corto/medio plazo es tipicamente 3:1–6:1. Por encima, el recorrido esperado raramente se materializa en el horizonte temporal analizado.
+
+#### La interacción entre ambos números
+
+```
+R/R < 3.0        → DESCALIFICADO (no aparece en el Top 5)
+3.0 ≤ R/R < 6.0  → Score crece linealmente: 3.0→17.5 pts, 4.5→26.25 pts, 6.0→35 pts
+R/R ≥ 6.0        → Score fijo en 35 pts (techo, sin beneficio extra)
+```
+
+Esto produce un sistema de dos niveles: el 3:1 **filtra** (gate), y el 6:1 **normaliza** (scale). Un asset pasa el filtro con el mínimo aceptable y compite en score contra otros que superan ese mínimo — el score decide el ranking dentro de los calificados.
+
+---
+
+### 7.3 Por qué un score compuesto en vez de ordenar solo por R/R
+
+Ordenar únicamente por R/R produciría rankings incorrectos. Estos tres casos ilustran el problema:
+
+| Asset | R/R | Confianza | Indicadores | Score compuesto | Rank por R/R solo |
+|---|---|---|---|---|---|
+| A | 5.5:1 | 0.45 | 1/3 (solo MACD) | 52.8 | 1 ❌ |
+| B | 4.0:1 | 0.90 | 3/3 | 89.3 | 3 |
+| C | 3.2:1 | 0.82 | 2/3 | 71.4 | 4 |
+
+**Asset A** tiene el R/R más alto, pero baja confianza (el VisionAgent no ve el patrón claramente) y solo un indicador alineado. Ordenar por R/R lo pondría primero — un falso positivo con alto riesgo de fallo.
+
+**Asset B** tiene una confianza muy alta y 3/3 indicadores confluentes — el setup es sólido. El score compuesto lo prioriza correctamente.
+
+**Los tres componentes del score capturan dimensiones independientes:**
+
+| Componente | Peso | Qué mide | Por qué no es sustituible por R/R |
+|---|---|---|---|
+| `confidence × 40` | 40 % | Calidad del patrón visual (LLM vision) — claridad del setup, respeto de S/R en el gráfico | R/R no dice si el patrón es limpio o ruidoso |
+| `rr_normalized × 35` | 35 % | Potencial matemático de la operación | Único componente relacionado con R/R, pero limitado al 35 % del score total |
+| `confluence × 25` | 25 % | Convergencia de señales independientes (MACD + RSI + Volumen) | R/R no captura si varios indicadores confirman o contradicen el movimiento |
+
+**Regla práctica:** El R/R define si una oportunidad *es aceptable*. El score compuesto define *cuál oportunidad aceptable es mejor*.
 
 ---
 
@@ -271,15 +361,12 @@ frontend/src/components/OpportunitiesPanel/
 ## 11. Environment Variables (additions)
 
 ```bash
-# Required for screenshot capture
-INVESTING_COM_EMAIL=your@email.com
-INVESTING_COM_PASSWORD=yourpassword
-
 # Optional tuning
-INVESTING_COM_CHART_INTERVAL=1D    # Chart timeframe: 1D, 1W, 1M
 ANALYSIS_MIN_RR_RATIO=3.0          # Minimum risk/reward to qualify
 ANALYSIS_TOP_N=5                   # Number of top opportunities to show
 ```
+
+> **Removed:** `INVESTING_COM_EMAIL`, `INVESTING_COM_PASSWORD`, and `INVESTING_COM_CHART_INTERVAL` are no longer required — screenshots are pre-loaded from disk for the MVP.
 
 ---
 
@@ -292,9 +379,9 @@ ANALYSIS_TOP_N=5                   # Number of top opportunities to show
 | `test_data_agent.py` | MACD/RSI/pivot calculations with mocked yfinance responses |
 | `test_scoring_agent.py` | R/R filter (3.0 threshold), score formula, ranking order, 0-asset edge case |
 | `test_vision_agent.py` | Structured output parsing, fallback when screenshot is None, malformed LLM response handling |
-| `test_orchestrator.py` | Per-asset error isolation (one failure doesn't abort run), correct stage sequencing |
+| `test_orchestrator.py` | Per-asset error isolation (one failure doesn't abort run), correct stage sequencing, missing PNG handled as None |
 
-**ScreenshotAgent** is tested with a Playwright mock — no live connection to investing.com in CI.
+**Stage 2** requires no mocking — it reads PNGs from `finally/screenshots/`. Tests can place fixture PNGs there or rely on the `None` fallback path.
 
 ### E2E tests (`test/`)
 
@@ -319,8 +406,99 @@ The following sections of PLAN.md require amendments when this feature is implem
 | §7 Database | `analysis_results` and `analysis_tickers` tables |
 | §8 API Endpoints | Analysis endpoint group |
 | §10 Frontend Design | OpportunitiesPanel component group |
-| §11 Docker | `playwright install chromium --with-deps` in Stage 2 |
+| §11 Docker | No Playwright dependency needed for MVP (screenshots pre-loaded from disk) |
 | §12 Testing | Analysis unit tests and E2E scenarios |
+
+---
+
+## 15. Orchestration Framework Decision
+
+### Two independent orchestration layers
+
+This feature uses two distinct orchestration mechanisms. Neither layer depends on an external framework (LangChain, AutoGen, CrewAI, LangGraph, Celery, Ray).
+
+---
+
+### Layer 1 — Implementation agents (Claude Code Agent Teams)
+
+The 5 specialist agents that **build** this feature are native Claude Code agents:
+
+| Agent file | Tasks | Responsibility |
+|---|---|---|
+| `infra-engineer.md` | 1, 16, 17 | pyproject.toml deps, Dockerfile, .env.example |
+| `db-engineer.md` | 2–3 | `analysis_results` / `analysis_tickers` schema + repository |
+| `analysis-engineer.md` | 4–9 | models, DataAgent, ScreenshotAgent, VisionAgent, ScoringAgent, Orchestrator |
+| `api-engineer.md` | 10 | FastAPI router + `main.py` registration |
+| `frontend-engineer.md` | 11–15 | TypeScript types, API client, hook, OpportunitiesPanel, E2E test |
+
+**Activation mechanism:**
+- `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` (set in `finally/.claude/settings.json`)
+- `teammateMode: "in-process"` — agents run in the same Claude Code process
+- No external process, no network call, no serialization overhead
+- Agents are invoked by Claude Code based on task context and agent `description` frontmatter
+
+**Why no external orchestration framework here:** These agents execute once per feature and share the same file system. Claude Code's built-in agent team dispatch is sufficient; adding a framework would introduce setup cost with zero benefit for a one-shot implementation workflow.
+
+---
+
+### Layer 2 — Analysis pipeline (Python asyncio)
+
+The runtime orchestration of the 4-stage analysis pipeline is pure Python:
+
+```python
+# Stage 1: parallel data fetch — no I/O blocking between tickers
+indicators: list[TechnicalIndicators] = await asyncio.gather(
+    *[fetch_data(ticker) for ticker in tickers],
+    return_exceptions=True,  # per-asset error isolation
+)
+
+# Stage 2: load pre-captured PNGs from finally/screenshots/{TICKER}.png
+screenshots: dict[str, bytes | None] = load_screenshots(tickers)
+
+# Stage 3: parallel LLM vision calls — each call is independent
+analyses: list[AssetAnalysis] = await asyncio.gather(
+    *[analyze_asset(ind, screenshots.get(ind.ticker)) for ind in indicators],
+    return_exceptions=True,
+)
+
+# Stage 4: single synchronous pass — CPU-only, no I/O
+results: AnalysisResult = score_and_rank(analyses)
+```
+
+**Sync-in-async bridge:**
+- `yfinance.download()` is synchronous → wrapped with `asyncio.to_thread()`
+- `litellm.completion()` is synchronous → wrapped with `asyncio.to_thread()`
+- No blocking of the FastAPI event loop
+
+**Why not LangGraph / Celery / Ray:**
+La orquestación del análisis de activos es Python puro con asyncio:
+
+
+# Stage 1: paralelo
+indicators = await asyncio.gather(*[fetch_data(t) for t in tickers])
+
+# Stage 2: secuencial (un solo browser)
+screenshots = await capture_charts(tickers)
+
+# Stage 3: paralelo
+analyses = await asyncio.gather(*[analyze_asset(t) for t in tickers])
+
+# Stage 4: secuencial
+results = score_and_rank(analyses)
+asyncio.gather() → paralelismo
+asyncio.to_thread() → wrappea llamadas síncronas (yfinance, litellm)
+Sin LangGraph, sin Celery, sin ray — todo en memoria dentro del proceso FastAPI
+
+¿Por qué no un framework de orquestación? Para ~10 activos, asyncio es suficiente, más simple, sin dependencias extra, y evita overhead de serialización. Un framework como LangGraph agregaría valor si los agentes necesitaran estado persistente entre pasos o reintentos complejos.
+
+| Option | Why rejected |
+|---|---|
+| LangGraph | Adds state graph overhead; our 4-stage sequence is linear and doesn't need conditional branching or checkpointing |
+| Celery | Requires a broker (Redis/RabbitMQ); overkill for 10 assets, ~40s total runtime within a single HTTP request |
+| Ray | Distributed compute for a workload that fits in a single process; dependency weight (~500MB) not justified |
+| asyncio (chosen) | Zero extra dependencies, integrates natively with FastAPI, sufficient for N≤20 tickers |
+
+**Scaling threshold:** If the ticker list grows beyond ~50 assets or analysis needs to run on a schedule (not on-demand), introduce a task queue (Celery + Redis) and promote ScoringAgent to a separate worker. For the current scope (10 default + user additions), asyncio is the correct choice.
 
 ---
 
@@ -329,7 +507,7 @@ The following sections of PLAN.md require amendments when this feature is implem
 | Question | Decision |
 |---|---|
 | Data source for indicators | Hybrid: yfinance (numeric) + investing.com (visual) |
-| Screenshot source | investing.com via Playwright with user credentials |
+| Screenshot source | Pre-captured PNGs in `finally/screenshots/` (MVP); Playwright path removed |
 | Analysis trigger | On-demand + SQLite cache + manual refresh |
 | UI placement | Dedicated panel below main chart, coexists with it |
 | S/R detection | Numerical pivot points + LLM visual validation |

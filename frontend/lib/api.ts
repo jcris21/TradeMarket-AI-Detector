@@ -114,6 +114,13 @@ export async function getHealth(): Promise<{ status: string }> {
   return request<{ status: string }>("/health");
 }
 
+export async function getTickerHistory(
+  ticker: string,
+  period = "3mo"
+): Promise<{ ticker: string; period: string; data: { time: number; value: number }[] }> {
+  return request(`/market/history/${ticker}?period=${period}`);
+}
+
 export async function runAnalysis(tickers?: string[]): Promise<AnalysisRunResponse> {
   return request<AnalysisRunResponse>("/analysis/run", {
     method: "POST",

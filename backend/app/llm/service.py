@@ -3,7 +3,7 @@
 import logging
 import os
 
-from litellm import completion
+from litellm import acompletion
 
 from app.db import (
     add_to_watchlist,
@@ -236,11 +236,10 @@ async def chat_with_llm(user_message: str, price_cache: PriceCache) -> dict:
     messages = _build_messages(context, history, user_message)
 
     try:
-        response = completion(
+        response = await acompletion(
             model=MODEL,
             messages=messages,
             response_format=LlmResponse,
-            reasoning_effort="low",
             extra_body=EXTRA_BODY,
         )
         content = response.choices[0].message.content

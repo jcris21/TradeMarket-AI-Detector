@@ -8,6 +8,8 @@ import math
 import random
 
 import numpy as np
+import pandas as pd
+import yfinance as yf
 
 from .cache import PriceCache
 from .interface import MarketDataSource
@@ -52,9 +54,11 @@ class GBMSimulator:
         tickers: list[str],
         dt: float = DEFAULT_DT,
         event_probability: float = 0.001,
+        initial_prices: dict[str, float] | None = None,
     ) -> None:
         self._dt = dt
         self._event_prob = event_probability
+        self._initial_prices: dict[str, float] = initial_prices or {}
 
         # Per-ticker state
         self._tickers: list[str] = []
@@ -148,7 +152,13 @@ class GBMSimulator:
         if ticker in self._prices:
             return
         self._tickers.append(ticker)
-        self._prices[ticker] = SEED_PRICES.get(ticker, random.uniform(50.0, 300.0))
+        # Priority: live yfinance prices > SEED_PRICES > random fallback
+        price = (
+            self._initial_prices.get(ticker)
+            or SEED_PRICES.get(ticker)
+            or random.uniform(50.0, 300.0)
+        )
+        self._prices[ticker] = price
         self._params[ticker] = TICKER_PARAMS.get(ticker, dict(DEFAULT_PARAMS))
 
     def _rebuild_cholesky(self) -> None:
@@ -197,6 +207,48 @@ class GBMSimulator:
         return CROSS_GROUP_CORR
 
 
+async def _fetch_live_seeds(tickers: list[str]) -> dict[str, float]:
+    """Fetch the latest close price for each ticker from yfinance.
+
+    Returns a partial dict — tickers that fail are simply omitted so the
+    caller falls back to SEED_PRICES for those.
+    """
+    if not tickers:
+        return {}
+    try:
+        batch_df: pd.DataFrame = await asyncio.to_thread(
+            yf.download,
+            tickers,
+            period="5d",
+            interval="1d",
+            progress=False,
+            auto_adjust=True,
+            group_by="ticker",
+        )
+        prices: dict[str, float] = {}
+        for ticker in tickers:
+            try:
+                if isinstance(batch_df.columns, pd.MultiIndex):
+                    # Drop the ticker level so columns become Open/High/Low/Close/Volume
+                    ticker_df = batch_df.loc[
+                        :, batch_df.columns.get_level_values(0) == ticker
+                    ].copy()
+                    ticker_df.columns = ticker_df.columns.get_level_values(1)
+                    close = ticker_df["Close"]
+                else:
+                    close = batch_df["Close"]
+                last = float(close.dropna().iloc[-1])
+                if last > 0:
+                    prices[ticker] = last
+            except Exception:
+                pass
+        logger.info("Live seed prices fetched: %s", {t: round(v, 2) for t, v in prices.items()})
+        return prices
+    except Exception:
+        logger.warning("Could not fetch live seed prices from yfinance; using SEED_PRICES fallback")
+        return {}
+
+
 class SimulatorDataSource(MarketDataSource):
     """MarketDataSource backed by the GBM simulator.
 
@@ -217,9 +269,17 @@ class SimulatorDataSource(MarketDataSource):
         self._task: asyncio.Task | None = None
 
     async def start(self, tickers: list[str]) -> None:
+        live_seeds = await _fetch_live_seeds(tickers)
+        if live_seeds:
+            logger.info(
+                "Simulator: seeded with live yfinance prices for %d/%d tickers",
+                len(live_seeds),
+                len(tickers),
+            )
         self._sim = GBMSimulator(
             tickers=tickers,
             event_probability=self._event_prob,
+            initial_prices=live_seeds,
         )
         # Seed the cache with initial prices so SSE has data immediately
         for ticker in tickers:

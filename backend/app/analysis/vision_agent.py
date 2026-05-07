@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 import logging
+import re
 
 from litellm import completion
 from pydantic import ValidationError
@@ -12,8 +13,9 @@ from .models import AssetAnalysis, TechnicalIndicators
 
 logger = logging.getLogger(__name__)
 
-MODEL = "openrouter/openai/gpt-oss-120b"
-EXTRA_BODY = {"provider": {"order": ["cerebras"]}}
+MODEL_VISION = "openrouter/openai/gpt-4o"
+MODEL_TEXT = "openrouter/openai/gpt-oss-120b"
+EXTRA_BODY_TEXT = {"provider": {"order": ["cerebras"]}}
 
 _SYSTEM_PROMPT = """You are an expert technical analyst. You will receive:
 1. A chart screenshot from investing.com (when available)
@@ -72,6 +74,27 @@ def _build_messages(indicators: TechnicalIndicators, screenshot: bytes | None) -
     ]
 
 
+def _extract_json(content: str) -> str:
+    """Strip markdown code fences that some models add around JSON responses."""
+    content = content.strip()
+    match = re.search(r"```(?:json)?\s*(.*?)\s*```", content, re.DOTALL)
+    return match.group(1).strip() if match else content
+
+
+def _validate_prices(result: AssetAnalysis, indicators: TechnicalIndicators) -> AssetAnalysis:
+    """Override LLM prices with real DataAgent values to prevent hallucination."""
+    entry = indicators.current_price
+    stop = result.stop_loss if 0 < result.stop_loss < entry else indicators.support_1
+    target = result.target_price if result.target_price > entry else indicators.resistance_1
+    rr = round((target - entry) / (entry - stop), 2) if (entry - stop) > 0.01 else 0.0
+    return result.model_copy(update={
+        "entry_price": round(entry, 2),
+        "stop_loss": round(stop, 2),
+        "target_price": round(target, 2),
+        "risk_reward_ratio": rr,
+    })
+
+
 def _degraded_result(ticker: str) -> AssetAnalysis:
     return AssetAnalysis(
         ticker=ticker,
@@ -87,33 +110,56 @@ def _degraded_result(ticker: str) -> AssetAnalysis:
     )
 
 
+async def _call_llm(messages: list[dict], use_vision: bool) -> str:
+    """Call the appropriate model. Vision calls use gpt-4o; text-only uses Cerebras."""
+    if use_vision:
+        response = await asyncio.to_thread(
+            completion,
+            model=MODEL_VISION,
+            messages=messages,
+            max_tokens=1024,
+        )
+    else:
+        response = await asyncio.to_thread(
+            completion,
+            model=MODEL_TEXT,
+            messages=messages,
+            max_tokens=1024,
+            extra_body=EXTRA_BODY_TEXT,
+        )
+    return response.choices[0].message.content
+
+
 async def analyze_asset(
     indicators: TechnicalIndicators,
     screenshot: bytes | None,
 ) -> AssetAnalysis:
     """Call the LLM to analyze one asset. Never raises — returns degraded result on error."""
+    has_screenshot = screenshot is not None
     messages = _build_messages(indicators, screenshot)
 
     try:
-        response = await asyncio.to_thread(
-            completion,
-            model=MODEL,
-            messages=messages,
-            reasoning_effort="low",
-            extra_body=EXTRA_BODY,
-        )
-        content = response.choices[0].message.content
+        content = _extract_json(await _call_llm(messages, use_vision=has_screenshot))
         result = AssetAnalysis.model_validate_json(content)
 
-        # Force support_validated=False when no screenshot was provided
-        if screenshot is None:
+        if not has_screenshot:
             result = result.model_copy(update={"support_validated": False})
 
-        return result
+        return _validate_prices(result, indicators)
 
     except (ValidationError, json.JSONDecodeError, ValueError) as exc:
         logger.warning("VisionAgent parse error for %s: %s", indicators.ticker, exc)
         return _degraded_result(indicators.ticker)
     except Exception as exc:
-        logger.warning("VisionAgent LLM error for %s: %s", indicators.ticker, exc)
+        logger.warning("VisionAgent LLM error for %s: %s — retrying text-only", indicators.ticker, exc)
+        # Retry without image if vision call failed
+        if has_screenshot:
+            try:
+                text_messages = _build_messages(indicators, None)
+                content = _extract_json(await _call_llm(text_messages, use_vision=False))
+                result = AssetAnalysis.model_validate_json(content)
+                result = result.model_copy(update={"support_validated": False})
+                return _validate_prices(result, indicators)
+            except Exception as retry_exc:
+                logger.warning("VisionAgent text-only retry failed for %s: %s", indicators.ticker, retry_exc)
         return _degraded_result(indicators.ticker)
