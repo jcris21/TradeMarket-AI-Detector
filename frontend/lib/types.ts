@@ -110,6 +110,11 @@ export interface AssetAnalysis {
   score: number | null;
   rank: number | null;
   analyzed_at?: string;
+  expected_gain_per10?: number | null;
+  expected_loss_per10?: number | null;
+  expected_value_per10?: number | null;
+  hit_rate_used?: number | null;
+  hit_rate_source?: string | null;
 }
 
 /** Response from POST /api/analysis/run */

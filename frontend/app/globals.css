@@ -1,21 +1,91 @@
 @import "tailwindcss";
 
 @theme inline {
-  --color-bg-primary: #0d1117;
-  --color-bg-secondary: #1a1a2e;
-  --color-bg-panel: #161b22;
-  --color-bg-hover: #21262d;
-  --color-border: #30363d;
-  --color-text-primary: #e6edf3;
-  --color-text-secondary: #8b949e;
-  --color-text-muted: #6e7681;
-  --color-accent-yellow: #ecad0a;
-  --color-accent-blue: #209dd7;
-  --color-accent-purple: #753991;
+  /* === Quant-Logic Terminal Design System ===
+     Source: Stitch / projects/5826104605440536811 */
+
+  /* Surface scale */
+  --color-surface:                   #10141a;
+  --color-surface-dim:               #10141a;
+  --color-surface-bright:            #353940;
+  --color-surface-container-lowest:  #0a0e14;
+  --color-surface-container-low:     #181c22;
+  --color-surface-container:         #1c2026;
+  --color-surface-container-high:    #262a31;
+  --color-surface-container-highest: #31353c;
+  --color-surface-variant:           #31353c;
+  --color-surface-tint:              #84cfff;
+
+  /* On-surface */
+  --color-on-surface:         #dfe2eb;
+  --color-on-surface-variant: #bec8d1;
+  --color-inverse-surface:    #dfe2eb;
+  --color-inverse-on-surface: #2d3137;
+
+  /* Outlines */
+  --color-outline:         #88929a;
+  --color-outline-variant: #3e484f;
+
+  /* Primary (blue) */
+  --color-primary:           #84cfff;
+  --color-on-primary:        #00344c;
+  --color-primary-container: #209dd7;
+  --color-on-primary-container: #003046;
+  --color-inverse-primary:   #00658e;
+
+  /* Secondary (purple) */
+  --color-secondary:           #eab2ff;
+  --color-on-secondary:        #4e0e6a;
+  --color-secondary-container: #672b83;
+  --color-on-secondary-container: #df9bfb;
+
+  /* Tertiary / accent (amber/yellow) */
+  --color-tertiary:           #fdbc23;
+  --color-on-tertiary:        #412d00;
+  --color-tertiary-container: #bf8b00;
+  --color-on-tertiary-container: #3c2900;
+
+  /* Error */
+  --color-error:           #ffb4ab;
+  --color-on-error:        #690005;
+  --color-error-container: #93000a;
+  --color-on-error-container: #ffdad6;
+
+  /* Semantic aliases (used across components) */
+  --color-bg-primary:    var(--color-surface);
+  --color-bg-secondary:  var(--color-surface-container);
+  --color-bg-panel:      var(--color-surface-container-low);
+  --color-bg-hover:      var(--color-surface-container-high);
+  --color-border:        var(--color-outline-variant);
+  --color-text-primary:  var(--color-on-surface);
+  --color-text-secondary: var(--color-on-surface-variant);
+  --color-text-muted:    var(--color-outline);
+  --color-accent-yellow: var(--color-tertiary);
+  --color-accent-blue:   var(--color-primary-container);
+  --color-accent-purple: var(--color-secondary-container);
   --color-gain: #26a641;
   --color-loss: #f85149;
-  --font-mono: "Geist Mono", ui-monospace, monospace;
-  --font-sans: "Geist", ui-sans-serif, sans-serif;
+
+  /* Typography */
+  --font-sans: var(--font-geist), "Geist", ui-sans-serif, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), "JetBrains Mono", ui-monospace, monospace;
+
+  /* Rounded */
+  --radius-sm:      0.125rem;
+  --radius:         0.25rem;
+  --radius-md:      0.375rem;
+  --radius-lg:      0.5rem;
+  --radius-xl:      0.75rem;
+  --radius-full:    9999px;
+
+  /* Spacing */
+  --spacing-unit:             4px;
+  --spacing-container-margin: 24px;
+  --spacing-panel-gutter:     12px;
+  --spacing-cell-x:           12px;
+  --spacing-cell-y:           6px;
+  --spacing-stack-compact:    8px;
+  --spacing-stack-loose:      16px;
 }
 
 body {
@@ -24,14 +94,99 @@ body {
   font-family: var(--font-mono);
 }
 
-/* Price flash animations */
+/* === Typography scale === */
+.text-display-lg {
+  font-family: var(--font-sans);
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 40px;
+  letter-spacing: -0.02em;
+}
+
+.text-headline-md {
+  font-family: var(--font-sans);
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 24px;
+  letter-spacing: -0.01em;
+}
+
+.text-data-tabular {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 16px;
+  letter-spacing: 0;
+}
+
+.text-body-base {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 20px;
+  letter-spacing: 0;
+}
+
+.text-label-caps {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 14px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* === Tabular numbers utility === */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* === Input base === */
+input[type="text"],
+input[type="number"],
+textarea {
+  caret-color: var(--color-primary-container);
+}
+
+/* === Focus ring (neon 1px border) === */
+.focus-neon:focus {
+  outline: none;
+  border-color: var(--color-primary-container) !important;
+  box-shadow: 0 0 0 1px var(--color-primary-container);
+}
+
+/* === LED status indicator === */
+@keyframes led-live {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.5; }
+}
+
+@keyframes led-analyzing {
+  0%, 100% { box-shadow: 0 0 4px 1px var(--color-secondary-container); }
+  50%       { box-shadow: 0 0 8px 3px var(--color-secondary-container); }
+}
+
+.led-live {
+  animation: led-live 2s ease-in-out infinite;
+  box-shadow: 0 0 4px 1px var(--color-gain);
+}
+
+.led-connecting {
+  animation: led-live 0.8s ease-in-out infinite;
+}
+
+.led-analyzing {
+  animation: led-analyzing 1.5s ease-in-out infinite;
+}
+
+/* === Price flash animations === */
 @keyframes flash-green {
-  0% { background-color: rgba(38, 166, 65, 0.3); }
+  0%   { background-color: rgba(38, 166, 65, 0.3); }
   100% { background-color: transparent; }
 }
 
 @keyframes flash-red {
-  0% { background-color: rgba(248, 81, 73, 0.3); }
+  0%   { background-color: rgba(248, 81, 73, 0.3); }
   100% { background-color: transparent; }
 }
 
@@ -43,21 +198,21 @@ body {
   animation: flash-red 500ms ease-out;
 }
 
-/* Scrollbar styling */
+/* === Scrollbar === */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--color-bg-primary);
+  background: var(--color-surface-container-lowest);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--color-border);
-  border-radius: 3px;
+  background: var(--color-outline-variant);
+  border-radius: var(--radius-sm);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--color-text-muted);
+  background: var(--color-outline);
 }

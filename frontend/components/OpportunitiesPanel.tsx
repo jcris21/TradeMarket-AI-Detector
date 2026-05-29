@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react";
 import { useAnalysis } from "@/lib/use-analysis";
 import type { AssetAnalysis } from "@/lib/types";
+import BetSizeCell from "@/components/BetSizeCell";
 
 interface OpportunitiesPanelProps {
   onTickerSelect: (ticker: string) => void;
@@ -124,6 +125,7 @@ export default function OpportunitiesPanel({
                 <th className="px-3 py-2">Target</th>
                 <th className="px-3 py-2">Stop</th>
                 <th className="px-3 py-2">Señal</th>
+                <th className="px-3 py-2">Bet Size</th>
               </tr>
             </thead>
             <tbody>
@@ -144,6 +146,19 @@ export default function OpportunitiesPanel({
                   <td className="px-3 py-2 font-mono text-red-400">${asset.stop_loss.toFixed(2)}</td>
                   <td className="px-3 py-2">
                     <SignalBadge signal={asset.signal} />
+                  </td>
+                  <td className="px-3 py-2">
+                    {asset.signal === "BUY" ? (
+                      <BetSizeCell
+                        gain={asset.expected_gain_per10 ?? null}
+                        loss={asset.expected_loss_per10 ?? null}
+                        ev={asset.expected_value_per10 ?? null}
+                        hrUsed={asset.hit_rate_used ?? null}
+                        hrSrc={asset.hit_rate_source ?? null}
+                      />
+                    ) : (
+                      <span className="text-text-muted">—</span>
+                    )}
                   </td>
                 </tr>
               ))}

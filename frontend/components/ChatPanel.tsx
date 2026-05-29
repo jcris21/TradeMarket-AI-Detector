@@ -66,9 +66,7 @@ export default function ChatPanel({ onTradeExecuted, injectedMessage, onInjected
   return (
     <div className="flex flex-col h-full border-l border-border bg-bg-panel">
       <div className="flex items-center justify-between px-3 py-2 border-b border-border">
-        <h2 className="text-xs font-bold text-text-secondary uppercase tracking-wider">
-          AI Assistant
-        </h2>
+        <h2 className="text-label-caps text-text-secondary">AI Assistant</h2>
         <button
           onClick={() => setIsOpen(!isOpen)}
           className="text-text-muted hover:text-text-primary text-xs"
@@ -91,10 +89,10 @@ export default function ChatPanel({ onTradeExecuted, injectedMessage, onInjected
                 className={`text-xs ${msg.role === "user" ? "text-right" : "text-left"}`}
               >
                 <div
-                  className={`inline-block max-w-[90%] rounded px-3 py-2 ${
+                  className={`inline-block max-w-[90%] px-3 py-2 text-text-primary ${
                     msg.role === "user"
-                      ? "bg-accent-purple/30 text-text-primary"
-                      : "bg-bg-primary text-text-primary"
+                      ? "bg-accent-purple/20 border border-accent-purple/60"
+                      : "bg-surface-container border border-accent-blue/40"
                   }`}
                 >
                   <div className="whitespace-pre-wrap">{msg.content}</div>
@@ -142,7 +140,7 @@ export default function ChatPanel({ onTradeExecuted, injectedMessage, onInjected
                 onKeyDown={(e) => e.key === "Enter" && handleSend()}
                 placeholder="Ask about your portfolio..."
                 disabled={loading}
-                className="flex-1 bg-bg-primary border border-border rounded px-2 py-1.5 text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-blue disabled:opacity-50"
+                className="flex-1 bg-surface-container-lowest border border-border px-2 py-1.5 text-xs font-mono text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-blue disabled:opacity-50"
               />
               <button
                 onClick={handleSend}

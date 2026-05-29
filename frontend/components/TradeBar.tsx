@@ -49,7 +49,7 @@ export default function TradeBar({ prices, onTradeExecuted }: TradeBarProps) {
           value={ticker}
           onChange={(e) => setTicker(e.target.value)}
           placeholder="Ticker"
-          className="w-20 bg-bg-primary border border-border rounded px-2 py-1 text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-blue uppercase"
+          className="w-20 bg-surface-container-lowest border border-border px-2 py-1 text-xs font-mono text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-blue uppercase"
         />
         <input
           type="number"
@@ -58,7 +58,7 @@ export default function TradeBar({ prices, onTradeExecuted }: TradeBarProps) {
           placeholder="Qty"
           min="0"
           step="1"
-          className="w-20 bg-bg-primary border border-border rounded px-2 py-1 text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-blue"
+          className="w-20 bg-surface-container-lowest border border-border px-2 py-1 text-xs font-mono tabular-nums text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-blue"
         />
         {currentPrice && (
           <span className="text-text-muted text-xs tabular-nums">

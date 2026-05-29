@@ -120,8 +120,8 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Right column: Chat panel */}
-        <div className="w-80 shrink-0">
+        {/* Right column: Chat panel — 360px per design system */}
+        <div className="w-[360px] shrink-0">
           <ChatPanel
             onTradeExecuted={refreshAll}
             injectedMessage={chatInjectedMessage}

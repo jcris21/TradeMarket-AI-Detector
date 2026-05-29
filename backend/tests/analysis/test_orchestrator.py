@@ -27,6 +27,7 @@ _ANALYSIS = AssetAnalysis(
 @patch("app.analysis.orchestrator.analyze_asset", new_callable=AsyncMock)
 @patch("app.analysis.orchestrator.save_analysis_results", new_callable=AsyncMock)
 async def test_run_analysis_returns_analysis_result(mock_save, mock_vision, mock_data):
+    mock_save.return_value = []
     mock_data.return_value = {"NVDA": _INDICATORS}
     mock_vision.return_value = _ANALYSIS.model_copy(update={"rank": 1, "score": 88.0})
 
@@ -44,6 +45,7 @@ async def test_run_analysis_returns_analysis_result(mock_save, mock_vision, mock
 @patch("app.analysis.orchestrator.save_analysis_results", new_callable=AsyncMock)
 async def test_data_fetch_error_is_isolated(mock_save, mock_vision, mock_data):
     """A DataFetchError for one ticker should not abort the whole run."""
+    mock_save.return_value = []
     mock_data.return_value = {
         "FAKE": DataFetchError("FAKE"),
         "NVDA": _INDICATORS,
@@ -62,8 +64,25 @@ async def test_data_fetch_error_is_isolated(mock_save, mock_vision, mock_data):
 @patch("app.analysis.orchestrator.analyze_asset", new_callable=AsyncMock)
 @patch("app.analysis.orchestrator.save_analysis_results", new_callable=AsyncMock)
 async def test_duration_seconds_is_positive(mock_save, mock_vision, mock_data):
+    mock_save.return_value = []
     mock_data.return_value = {"NVDA": _INDICATORS}
     mock_vision.return_value = _ANALYSIS
 
     result = await run_analysis(["NVDA"])
     assert result.duration_seconds >= 0
+
+
+@patch.dict(os.environ, {"PLAYWRIGHT_MOCK": "true"})
+@patch("app.analysis.orchestrator.fetch_indicators_batch", new_callable=AsyncMock)
+@patch("app.analysis.orchestrator.analyze_asset", new_callable=AsyncMock)
+@patch("app.analysis.orchestrator.save_analysis_results", new_callable=AsyncMock)
+async def test_orchestrator_surfaces_write_errors(mock_save, mock_vision, mock_data):
+    """DB write errors returned by save_analysis_results appear in AnalysisResult.errors."""
+    mock_save.return_value = [{"ticker": "NVDA", "error_message": "disk I/O error"}]
+    mock_data.return_value = {"NVDA": _INDICATORS}
+    mock_vision.return_value = _ANALYSIS
+
+    result = await run_analysis(["NVDA"])
+
+    assert any(e["ticker"] == "NVDA" for e in result.errors)
+    assert any("disk I/O error" in e.get("error_message", "") for e in result.errors)

@@ -37,7 +37,13 @@ class AssetAnalysis(BaseModel):
     indicators_summary: dict
     argument: str
     score: float | None = None
+    score_delta: float | None = None
     rank: int | None = None
+    expected_gain_per10: float | None = None
+    expected_loss_per10: float | None = None
+    expected_value_per10: float | None = None
+    hit_rate_used: float | None = None
+    hit_rate_source: str | None = None
 
     def to_db_row(self, run_id: str) -> dict:
         """Convert to a dict suitable for save_analysis_results()."""
@@ -46,6 +52,7 @@ class AssetAnalysis(BaseModel):
             "ticker": self.ticker,
             "rank": self.rank,
             "score": self.score,
+            "score_delta": self.score_delta,
             "signal": self.signal,
             "confidence": self.confidence,
             "risk_reward_ratio": self.risk_reward_ratio,
@@ -56,6 +63,11 @@ class AssetAnalysis(BaseModel):
             "argument": self.argument,
             "indicators_summary": json.dumps(self.indicators_summary),
             "screenshot_path": None,
+            "expected_gain_per10": self.expected_gain_per10,
+            "expected_loss_per10": self.expected_loss_per10,
+            "expected_value_per10": self.expected_value_per10,
+            "hit_rate_used": self.hit_rate_used,
+            "hit_rate_source": self.hit_rate_source,
         }
 
 

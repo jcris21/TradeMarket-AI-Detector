@@ -1,11 +1,16 @@
 """CRUD operations for all database tables."""
 
 import json
+import logging
 import uuid
 from datetime import datetime, timezone
 
+import aiosqlite
+
 from .connection import get_connection
 from .schema import DEFAULT_USER_ID
+
+logger = logging.getLogger(__name__)
 
 
 def _now() -> str:
@@ -350,40 +355,54 @@ async def remove_analysis_ticker(ticker: str, user_id: str = DEFAULT_USER_ID) ->
 
 async def save_analysis_results(
     rows: list[dict], user_id: str = DEFAULT_USER_ID
-) -> None:
-    """Persist a batch of analysis results. Each dict matches analysis_results columns."""
+) -> list[dict]:
+    """Persist a batch of analysis results. Returns per-ticker write errors (if any)."""
     db = await get_connection()
+    write_errors: list[dict] = []
     try:
         for row in rows:
-            await db.execute(
-                "INSERT INTO analysis_results "
-                "(id, user_id, run_id, ticker, rank, score, signal, confidence, "
-                "risk_reward_ratio, entry_price, target_price, stop_loss, "
-                "support_validated, argument, indicators_summary, screenshot_path, analyzed_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    _uuid(),
-                    user_id,
-                    row["run_id"],
-                    row["ticker"],
-                    row.get("rank"),
-                    row.get("score"),
-                    row.get("signal"),
-                    row.get("confidence"),
-                    row.get("risk_reward_ratio"),
-                    row.get("entry_price"),
-                    row.get("target_price"),
-                    row.get("stop_loss"),
-                    1 if row.get("support_validated") else 0,
-                    row.get("argument"),
-                    row.get("indicators_summary"),
-                    row.get("screenshot_path"),
-                    _now(),
-                ),
-            )
-        await db.commit()
+            try:
+                await db.execute(
+                    "INSERT INTO analysis_results "
+                    "(id, user_id, run_id, ticker, rank, score, score_delta, signal, confidence, "
+                    "risk_reward_ratio, entry_price, target_price, stop_loss, "
+                    "support_validated, argument, indicators_summary, screenshot_path, analyzed_at, "
+                    "expected_gain_per10, expected_loss_per10, expected_value_per10, "
+                    "hit_rate_used, hit_rate_source) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        _uuid(),
+                        user_id,
+                        row["run_id"],
+                        row["ticker"],
+                        row.get("rank"),
+                        row.get("score"),
+                        row.get("score_delta"),
+                        row.get("signal"),
+                        row.get("confidence"),
+                        row.get("risk_reward_ratio"),
+                        row.get("entry_price"),
+                        row.get("target_price"),
+                        row.get("stop_loss"),
+                        1 if row.get("support_validated") else 0,
+                        row.get("argument"),
+                        row.get("indicators_summary"),
+                        row.get("screenshot_path"),
+                        _now(),
+                        row.get("expected_gain_per10"),
+                        row.get("expected_loss_per10"),
+                        row.get("expected_value_per10"),
+                        row.get("hit_rate_used"),
+                        row.get("hit_rate_source"),
+                    ),
+                )
+                await db.commit()
+            except aiosqlite.Error as e:
+                logger.error("DB write failed for %s: %s", row.get("ticker"), e)
+                write_errors.append({"ticker": row.get("ticker", "unknown"), "error_message": str(e)})
     finally:
         await db.close()
+    return write_errors
 
 
 def _parse_analysis_row(row) -> dict:

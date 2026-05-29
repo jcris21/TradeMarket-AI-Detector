@@ -41,6 +41,12 @@ _MOCK_ANALYSIS_SEED = [
             "support_1": 172.20,
             "resistance_1": 208.54,
         }),
+        # Bet-size: gain=round(10*(208.54-178.50)/178.50,2)=1.68, loss=round(10*(178.50-172.20)/178.50,2)=0.35
+        "expected_gain_per10": 1.68,
+        "expected_loss_per10": 0.35,
+        "expected_value_per10": round(0.35 * 1.68 - 0.65 * 0.35, 2),
+        "hit_rate_used": 0.35,
+        "hit_rate_source": "assumed",
     },
     {
         "ticker": "AMZN",
@@ -68,6 +74,12 @@ _MOCK_ANALYSIS_SEED = [
             "support_1": 190.50,
             "resistance_1": 223.61,
         }),
+        # Bet-size: gain=round(10*(223.61-198.20)/198.20,2)=1.28, loss=round(10*(198.20-190.50)/198.20,2)=0.39
+        "expected_gain_per10": 1.28,
+        "expected_loss_per10": 0.39,
+        "expected_value_per10": round(0.35 * 1.28 - 0.65 * 0.39, 2),
+        "hit_rate_used": 0.35,
+        "hit_rate_source": "assumed",
     },
 ]
 
@@ -100,11 +112,31 @@ async def get_connection() -> aiosqlite.Connection:
     return db
 
 
+_BET_SIZE_COLUMNS = [
+    ("expected_gain_per10", "REAL"),
+    ("expected_loss_per10", "REAL"),
+    ("expected_value_per10", "REAL"),
+    ("hit_rate_used", "REAL"),
+    ("hit_rate_source", "TEXT"),
+    ("score_delta", "REAL"),
+]
+
+
 async def init_db() -> None:
     """Create tables and seed default data if needed."""
     db = await get_connection()
     try:
         await db.executescript(SCHEMA_SQL)
+
+        # Lazy migration: add columns if not already present
+        for col, col_type in _BET_SIZE_COLUMNS:
+            try:
+                await db.execute(
+                    f"ALTER TABLE analysis_results ADD COLUMN {col} {col_type}"
+                )
+            except aiosqlite.OperationalError as e:
+                if "duplicate column name" not in str(e):
+                    raise
 
         # Check if default user exists
         cursor = await db.execute(
@@ -145,8 +177,10 @@ async def init_db() -> None:
                         id, user_id, run_id, ticker, rank, score, signal, confidence,
                         risk_reward_ratio, entry_price, target_price, stop_loss,
                         support_validated, argument, indicators_summary,
-                        screenshot_path, analyzed_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+                        screenshot_path, analyzed_at,
+                        expected_gain_per10, expected_loss_per10, expected_value_per10,
+                        hit_rate_used, hit_rate_source
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         str(uuid.uuid4()),
@@ -165,6 +199,11 @@ async def init_db() -> None:
                         row["argument"],
                         row["indicators_summary"],
                         now,
+                        row["expected_gain_per10"],
+                        row["expected_loss_per10"],
+                        row["expected_value_per10"],
+                        row["hit_rate_used"],
+                        row["hit_rate_source"],
                     ),
                 )
 

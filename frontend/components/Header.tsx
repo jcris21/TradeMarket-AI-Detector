@@ -10,8 +10,8 @@ interface HeaderProps {
 }
 
 const statusColors: Record<ConnectionStatus, string> = {
-  connected: "bg-gain",
-  connecting: "bg-accent-yellow",
+  connected: "bg-gain led-live",
+  connecting: "bg-accent-yellow led-connecting",
   disconnected: "bg-loss",
 };
 

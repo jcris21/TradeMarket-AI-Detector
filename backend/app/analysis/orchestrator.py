@@ -7,11 +7,11 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from app.db import save_analysis_results
+from app.db import get_connection, save_analysis_results
 
 from .data_agent import fetch_indicators_batch
 from .models import AnalysisResult, AssetAnalysis, TechnicalIndicators
-from .scoring_agent import score_and_rank
+from .scoring_agent import _get_hit_rate, _get_prior_scores, score_and_rank
 from .vision_agent import analyze_asset
 
 logger = logging.getLogger(__name__)
@@ -68,14 +68,26 @@ async def run_analysis(tickers: list[str]) -> AnalysisResult:
     vision_tasks = [_vision_one(t) for t in successful]
     analyses: list[AssetAnalysis] = await asyncio.gather(*vision_tasks)
 
-    # Stage 4: Score and rank
+    # Stage 4: Score and rank (with bet-size pre-computation)
     logger.info("Stage 4: scoring and ranking %d analyses", len(analyses))
-    ranked = score_and_rank(analyses)
+    db = await get_connection()
+    try:
+        hit_rate, hit_rate_source = await _get_hit_rate(db)
+        prior_scores = await _get_prior_scores(db)
+    finally:
+        await db.close()
+    ranked = score_and_rank(
+        analyses,
+        hit_rate=hit_rate,
+        hit_rate_source=hit_rate_source,
+        prior_scores=prior_scores,
+    )
     top_5 = [a for a in ranked if a.rank is not None]
 
     # Persist results
     db_rows = [a.to_db_row(run_id) for a in ranked]
-    await save_analysis_results(db_rows)
+    write_errors = await save_analysis_results(db_rows)
+    errors.extend(write_errors)
 
     duration = round(time.monotonic() - start, 2)
     logger.info("Analysis complete in %.1fs — %d top opportunities", duration, len(top_5))
