@@ -6,7 +6,6 @@ import json
 import logging
 import re
 
-from litellm import completion
 from pydantic import ValidationError
 
 from .models import AssetAnalysis, TechnicalIndicators
@@ -112,6 +111,8 @@ def _degraded_result(ticker: str) -> AssetAnalysis:
 
 async def _call_llm(messages: list[dict], use_vision: bool) -> str:
     """Call the appropriate model. Vision calls use gpt-4o; text-only uses Cerebras."""
+    from litellm import completion
+
     if use_vision:
         response = await asyncio.to_thread(
             completion,

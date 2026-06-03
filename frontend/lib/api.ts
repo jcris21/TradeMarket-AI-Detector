@@ -9,6 +9,7 @@ import type {
   AnalysisRunResponse,
   AnalysisLatestResponse,
   AssetAnalysis,
+  PerformanceSummary,
 } from "./types";
 
 const BASE = "/api";
@@ -149,4 +150,8 @@ export async function addAnalysisTicker(ticker: string): Promise<void> {
 
 export async function removeAnalysisTicker(ticker: string): Promise<void> {
   await request(`/analysis/tickers/${ticker}`, { method: "DELETE" });
+}
+
+export async function getPerformanceSummary(): Promise<PerformanceSummary> {
+  return request<PerformanceSummary>("/analysis/performance");
 }

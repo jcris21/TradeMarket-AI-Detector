@@ -14,6 +14,8 @@ from .schema import DEFAULT_CASH_BALANCE, DEFAULT_TICKERS, DEFAULT_USER_ID, SCHE
 # AMZN:  confidence=0.74, rr=3.3, 2/3 indicators → score 65.52 (Rank 2)
 # Scores verified against scoring_agent._compute_score() formula:
 #   score = confidence×40 + min(rr/6,1)×100×0.35 + confluence×0.25
+# Signals for the "current" run (analyzed_at = now for GOOGL/AMZN,
+# analyzed_at = 38 days ago for AAPL so it triggers the ⚠ Orphaned badge).
 _MOCK_ANALYSIS_SEED = [
     {
         "ticker": "GOOGL",
@@ -41,12 +43,12 @@ _MOCK_ANALYSIS_SEED = [
             "support_1": 172.20,
             "resistance_1": 208.54,
         }),
-        # Bet-size: gain=round(10*(208.54-178.50)/178.50,2)=1.68, loss=round(10*(178.50-172.20)/178.50,2)=0.35
         "expected_gain_per10": 1.68,
         "expected_loss_per10": 0.35,
         "expected_value_per10": round(0.35 * 1.68 - 0.65 * 0.35, 2),
         "hit_rate_used": 0.35,
         "hit_rate_source": "assumed",
+        "analyzed_at_days_ago": 0,
     },
     {
         "ticker": "AMZN",
@@ -74,12 +76,128 @@ _MOCK_ANALYSIS_SEED = [
             "support_1": 190.50,
             "resistance_1": 223.61,
         }),
-        # Bet-size: gain=round(10*(223.61-198.20)/198.20,2)=1.28, loss=round(10*(198.20-190.50)/198.20,2)=0.39
         "expected_gain_per10": 1.28,
         "expected_loss_per10": 0.39,
         "expected_value_per10": round(0.35 * 1.28 - 0.65 * 0.39, 2),
         "hit_rate_used": 0.35,
         "hit_rate_source": "assumed",
+        "analyzed_at_days_ago": 0,
+    },
+    # AAPL: same run, but analyzed 38 days ago with no outcome → ⚠ Orphaned badge
+    {
+        "ticker": "AAPL",
+        "rank": 3,
+        "score": 71.80,
+        "signal": "BUY",
+        "confidence": 0.78,
+        "risk_reward_ratio": 3.5,
+        "entry_price": 172.40,
+        "target_price": 195.80,
+        "stop_loss": 165.50,
+        "support_validated": 1,
+        "argument": (
+            "AAPL presenta RSI en 41.3 con divergencia alcista en timeframe diario y "
+            "MACD cerca del cruce positivo — confluencia 2/3. El soporte S1 en $165.50 "
+            "ha sido testado 3 veces sin ruptura. Ratio riesgo/beneficio de 3.5:1. "
+            "⚠ Sin confirmación de outcome tras 38 días — revisar manualmente."
+        ),
+        "indicators_summary": json.dumps({
+            "macd": "near_crossover",
+            "rsi": 41.3,
+            "volume": 1.12,
+            "macd_histogram": 0.15,
+            "support_1": 165.50,
+            "resistance_1": 195.80,
+        }),
+        "expected_gain_per10": 1.36,
+        "expected_loss_per10": 0.40,
+        "expected_value_per10": round(0.35 * 1.36 - 0.65 * 0.40, 2),
+        "hit_rate_used": 0.35,
+        "hit_rate_source": "assumed",
+        "analyzed_at_days_ago": 38,  # triggers Orphaned badge (> 35 days, outcome=NULL)
+    },
+]
+
+# Historical resolved outcomes seeded in a separate older run.
+# These populate GET /api/analysis/performance with real metrics:
+#   target_hits=1, stop_hits=1, expired=1
+#   hit_ratio = 1/(1+1) = 0.50
+#   profit_factor = 20.0 / 9.17 ≈ 2.18
+_MOCK_RESOLVED_SEED = [
+    {
+        "ticker": "TSLA",
+        "rank": 1,
+        "score": 82.40,
+        "signal": "BUY",
+        "confidence": 0.84,
+        "risk_reward_ratio": 4.2,
+        "entry_price": 215.60,
+        "target_price": 258.72,
+        "stop_loss": 205.20,
+        "support_validated": 1,
+        "argument": "TSLA: cruce MACD alcista + RSI 38.4 en soporte — TARGET alcanzado.",
+        "indicators_summary": json.dumps({"macd": "bullish_crossover", "rsi": 38.4, "volume": 1.62}),
+        "expected_gain_per10": 2.00,
+        "expected_loss_per10": 0.48,
+        "expected_value_per10": round(0.35 * 2.00 - 0.65 * 0.48, 2),
+        "hit_rate_used": 0.35,
+        "hit_rate_source": "assumed",
+        "analyzed_at_days_ago": 60,
+        "outcome": "TARGET_HIT",
+        "actual_gain_pct": 20.0,   # (258.72 - 215.60) / 215.60 * 100
+        "actual_loss_pct": 3.8,
+        "hold_days": 45.0,
+        "support_break_level": None,
+    },
+    {
+        "ticker": "NVDA",
+        "rank": 2,
+        "score": 69.30,
+        "signal": "BUY",
+        "confidence": 0.72,
+        "risk_reward_ratio": 3.1,
+        "entry_price": 118.40,
+        "target_price": 137.34,
+        "stop_loss": 112.20,
+        "support_validated": 1,
+        "argument": "NVDA: MACD alcista pero volumen débil — STOP alcanzado en S1.",
+        "indicators_summary": json.dumps({"macd": "bullish_crossover", "rsi": 55.1, "volume": 0.91}),
+        "expected_gain_per10": 1.60,
+        "expected_loss_per10": 0.52,
+        "expected_value_per10": round(0.35 * 1.60 - 0.65 * 0.52, 2),
+        "hit_rate_used": 0.35,
+        "hit_rate_source": "assumed",
+        "analyzed_at_days_ago": 60,
+        "outcome": "STOP_HIT",
+        "actual_gain_pct": 5.2,
+        "actual_loss_pct": 9.17,   # (118.40 - 107.54) / 118.40 * 100
+        "hold_days": 30.0,
+        "support_break_level": "S1",
+    },
+    {
+        "ticker": "MSFT",
+        "rank": 3,
+        "score": 58.10,
+        "signal": "BUY",
+        "confidence": 0.65,
+        "risk_reward_ratio": 3.0,
+        "entry_price": 415.20,
+        "target_price": 466.80,
+        "stop_loss": 398.00,
+        "support_validated": 0,
+        "argument": "MSFT: señal débil — precio lateral durante 42 días, EXPIRADO.",
+        "indicators_summary": json.dumps({"macd": "neutral", "rsi": 49.8, "volume": 0.85}),
+        "expected_gain_per10": 1.24,
+        "expected_loss_per10": 0.41,
+        "expected_value_per10": round(0.35 * 1.24 - 0.65 * 0.41, 2),
+        "hit_rate_used": 0.35,
+        "hit_rate_source": "assumed",
+        "analyzed_at_days_ago": 60,
+        "outcome": "EXPIRED",
+        "actual_gain_pct": 1.8,
+        "actual_loss_pct": 1.2,
+        "hold_days": 42.0,
+        "support_break_level": None,
     },
 ]
 
@@ -121,15 +239,23 @@ _BET_SIZE_COLUMNS = [
     ("score_delta", "REAL"),
 ]
 
+_OUTCOME_COLUMNS = [
+    ("outcome", "TEXT"),
+    ("actual_gain_pct", "REAL"),
+    ("actual_loss_pct", "REAL"),
+    ("hold_days", "REAL"),
+]
+
 
 async def init_db() -> None:
     """Create tables and seed default data if needed."""
+    from datetime import timedelta
     db = await get_connection()
     try:
         await db.executescript(SCHEMA_SQL)
 
         # Lazy migration: add columns if not already present
-        for col, col_type in _BET_SIZE_COLUMNS:
+        for col, col_type in _BET_SIZE_COLUMNS + _OUTCOME_COLUMNS:
             try:
                 await db.execute(
                     f"ALTER TABLE analysis_results ADD COLUMN {col} {col_type}"
@@ -137,6 +263,11 @@ async def init_db() -> None:
             except aiosqlite.OperationalError as e:
                 if "duplicate column name" not in str(e):
                     raise
+
+        # Create outcome index after column migration (safe to run multiple times)
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_analysis_outcome ON analysis_results(outcome)"
+        )
 
         # Check if default user exists
         cursor = await db.execute(
@@ -168,9 +299,13 @@ async def init_db() -> None:
                     (str(uuid.uuid4()), DEFAULT_USER_ID, ticker, now),
                 )
 
-            # Seed mock analysis results so the UI renders on first launch
+            # Seed current run — GOOGL/AMZN fresh + AAPL orphaned (38 days ago)
             seed_run_id = str(uuid.uuid4())
             for row in _MOCK_ANALYSIS_SEED:
+                days_ago = row.get("analyzed_at_days_ago", 0)
+                row_ts = (
+                    datetime.now(timezone.utc) - timedelta(days=days_ago)
+                ).isoformat()
                 await db.execute(
                     """
                     INSERT INTO analysis_results (
@@ -198,12 +333,61 @@ async def init_db() -> None:
                         row["support_validated"],
                         row["argument"],
                         row["indicators_summary"],
-                        now,
+                        row_ts,
                         row["expected_gain_per10"],
                         row["expected_loss_per10"],
                         row["expected_value_per10"],
                         row["hit_rate_used"],
                         row["hit_rate_source"],
+                    ),
+                )
+
+            # Seed historical resolved run (60 days ago) for performance metrics
+            hist_run_id = str(uuid.uuid4())
+            hist_ts = (datetime.now(timezone.utc) - timedelta(days=60)).isoformat()
+            for row in _MOCK_RESOLVED_SEED:
+                await db.execute(
+                    """
+                    INSERT INTO analysis_results (
+                        id, user_id, run_id, ticker, rank, score, signal, confidence,
+                        risk_reward_ratio, entry_price, target_price, stop_loss,
+                        support_validated, argument, indicators_summary,
+                        screenshot_path, analyzed_at,
+                        expected_gain_per10, expected_loss_per10, expected_value_per10,
+                        hit_rate_used, hit_rate_source,
+                        outcome, actual_gain_pct, actual_loss_pct, hold_days,
+                        support_break_level
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?,
+                              ?, ?, ?, ?, ?,
+                              ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        str(uuid.uuid4()),
+                        DEFAULT_USER_ID,
+                        hist_run_id,
+                        row["ticker"],
+                        row["rank"],
+                        row["score"],
+                        row["signal"],
+                        row["confidence"],
+                        row["risk_reward_ratio"],
+                        row["entry_price"],
+                        row["target_price"],
+                        row["stop_loss"],
+                        row["support_validated"],
+                        row["argument"],
+                        row["indicators_summary"],
+                        hist_ts,
+                        row["expected_gain_per10"],
+                        row["expected_loss_per10"],
+                        row["expected_value_per10"],
+                        row["hit_rate_used"],
+                        row["hit_rate_source"],
+                        row["outcome"],
+                        row["actual_gain_pct"],
+                        row["actual_loss_pct"],
+                        row["hold_days"],
+                        row["support_break_level"],
                     ),
                 )
 

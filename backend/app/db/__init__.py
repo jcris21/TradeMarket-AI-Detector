@@ -29,8 +29,10 @@ Public API:
     add_analysis_ticker     - Add a ticker to analysis list
     remove_analysis_ticker  - Remove a ticker from analysis list
     save_analysis_results   - Persist analysis results batch
+    update_outcome_atomic   - Atomically write outcome for a signal (idempotent)
     get_latest_analysis     - Get most recent analysis run results
     get_analysis_by_ticker  - Get latest analysis for a specific ticker
+    get_performance_summary - Compute aggregated outcome metrics
 """
 
 from .connection import get_connection, init_db, set_db_path
@@ -41,6 +43,7 @@ from .repository import (
     get_analysis_by_ticker,
     get_analysis_tickers,
     get_cash_balance,
+    get_performance_summary,
     get_chat_history,
     get_latest_analysis,
     get_portfolio_history,
@@ -54,6 +57,7 @@ from .repository import (
     remove_from_watchlist,
     save_analysis_results,
     update_cash_balance,
+    update_outcome_atomic,
     upsert_position,
 )
 from .schema import DEFAULT_CASH_BALANCE, DEFAULT_TICKERS, DEFAULT_USER_ID
@@ -82,6 +86,8 @@ __all__ = [
     "get_latest_analysis",
     "remove_analysis_ticker",
     "save_analysis_results",
+    "update_outcome_atomic",
+    "get_performance_summary",
     "DEFAULT_USER_ID",
     "DEFAULT_TICKERS",
     "DEFAULT_CASH_BALANCE",

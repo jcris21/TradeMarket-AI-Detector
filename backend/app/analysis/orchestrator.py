@@ -11,7 +11,7 @@ from app.db import get_connection, save_analysis_results
 
 from .data_agent import fetch_indicators_batch
 from .models import AnalysisResult, AssetAnalysis, TechnicalIndicators
-from .scoring_agent import _get_hit_rate, _get_prior_scores, score_and_rank
+from .scoring_agent import _get_hit_rate, _get_prior_scores, score_and_rank_with_errors
 from .vision_agent import analyze_asset
 
 logger = logging.getLogger(__name__)
@@ -76,12 +76,13 @@ async def run_analysis(tickers: list[str]) -> AnalysisResult:
         prior_scores = await _get_prior_scores(db)
     finally:
         await db.close()
-    ranked = score_and_rank(
+    ranked, structural_errors = score_and_rank_with_errors(
         analyses,
         hit_rate=hit_rate,
         hit_rate_source=hit_rate_source,
         prior_scores=prior_scores,
     )
+    errors.extend(structural_errors)
     top_5 = [a for a in ranked if a.rank is not None]
 
     # Persist results

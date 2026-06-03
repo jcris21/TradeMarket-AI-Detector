@@ -95,6 +95,9 @@ export type ConnectionStatus = "connected" | "connecting" | "disconnected";
 /** Technical analysis signal */
 export type AnalysisSignal = "BUY" | "WAIT" | "AVOID";
 
+/** Signal freshness state derived at read time from analyzed_at */
+export type FreshnessStatus = "fresh" | "active" | "aged" | "expired";
+
 /** Single asset analysis result */
 export interface AssetAnalysis {
   ticker: string;
@@ -110,11 +113,14 @@ export interface AssetAnalysis {
   score: number | null;
   rank: number | null;
   analyzed_at?: string;
+  freshness_status?: FreshnessStatus;
+  freshness_age_hours?: number;
   expected_gain_per10?: number | null;
   expected_loss_per10?: number | null;
   expected_value_per10?: number | null;
   hit_rate_used?: number | null;
   hit_rate_source?: string | null;
+  outcome?: "TARGET_HIT" | "STOP_HIT" | "EXPIRED" | null;
 }
 
 /** Response from POST /api/analysis/run */
@@ -130,4 +136,22 @@ export interface AnalysisRunResponse {
 /** Response from GET /api/analysis/latest */
 export interface AnalysisLatestResponse {
   results: AssetAnalysis[];
+}
+
+/** Performance summary from GET /api/analysis/performance */
+export interface PerformanceSummary {
+  phase_gate_active: boolean;
+  calibration_count: number;
+  total_signals: number;
+  target_hits: number;
+  stop_hits: number;
+  expired: number;
+  orphaned_count: number;
+  hit_ratio: number | null;
+  profit_factor: number | null;
+  realized_rr: number | null;
+  hr_status: "green" | "red" | "neutral" | null;
+  pf_status: "green" | "red" | null;
+  rr_status: "green" | null;
+  below_breakeven: boolean;
 }

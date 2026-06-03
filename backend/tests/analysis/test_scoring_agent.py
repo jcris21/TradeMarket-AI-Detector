@@ -4,7 +4,14 @@ import pytest
 import aiosqlite
 
 from app.analysis.models import AssetAnalysis
-from app.analysis.scoring_agent import _compute_bet_size, _get_hit_rate, _get_prior_scores, score_and_rank
+from app.analysis.scoring_agent import (
+    _compute_bet_size,
+    _get_hit_rate,
+    _get_prior_scores,
+    score_and_rank,
+    score_and_rank_with_errors,
+    validate_asset_analysis,
+)
 
 
 def _make_analysis(
@@ -16,19 +23,114 @@ def _make_analysis(
     macd: str = "bullish_crossover",
     rsi: float = 55.0,
     volume: str = "above_avg",
+    entry_price: float = 100.0,
+    target_price: float = 130.0,
+    stop_loss: float = 90.0,
 ) -> AssetAnalysis:
     return AssetAnalysis(
         ticker=ticker,
         signal=signal,
         confidence=confidence,
-        entry_price=100.0,
-        target_price=130.0,
-        stop_loss=90.0,
+        entry_price=entry_price,
+        target_price=target_price,
+        stop_loss=stop_loss,
         risk_reward_ratio=rr_ratio,
         support_validated=support_validated,
         indicators_summary={"macd": macd, "rsi": rsi, "volume": volume},
         argument="Test argument.",
     )
+
+
+@pytest.mark.parametrize(
+    "asset,expected_valid,expected_reason",
+    [
+        (_make_analysis("VALID"), True, ""),
+        (_make_analysis("ENTRY", entry_price=0.0), False, "entry_price <= 0"),
+        (
+            _make_analysis("STOP", entry_price=100.0, stop_loss=100.0),
+            False,
+            "stop_loss >= entry_price (inverted stop)",
+        ),
+        (
+            _make_analysis("TARGET", entry_price=100.0, target_price=100.0),
+            False,
+            "target_price <= entry_price (inverted target)",
+        ),
+        (_make_analysis("RR", rr_ratio=-1.0), False, "negative risk_reward_ratio"),
+    ],
+)
+def test_validate_asset_analysis_guardrails(asset, expected_valid, expected_reason):
+    valid, reason = validate_asset_analysis(asset)
+    assert valid is expected_valid
+    assert reason == expected_reason
+
+
+@pytest.mark.parametrize(
+    "asset,reason_fragment",
+    [
+        (_make_analysis("ENTRY", entry_price=0.0), "entry_price <= 0"),
+        (_make_analysis("STOP", entry_price=100.0, stop_loss=101.0), "inverted stop"),
+        (_make_analysis("TARGET", entry_price=100.0, target_price=99.0), "inverted target"),
+        (_make_analysis("RR", rr_ratio=-0.1), "negative risk_reward_ratio"),
+    ],
+)
+def test_structurally_invalid_assets_are_not_scored_or_ranked(asset, reason_fragment):
+    ranked, errors = score_and_rank_with_errors([asset], min_rr=3.0, top_n=5)
+
+    assert len(ranked) == 1
+    result = ranked[0]
+    assert result.rank is None
+    assert result.score is None
+    assert result.score_delta is None
+    assert result.expected_gain_per10 is None
+    assert result.expected_loss_per10 is None
+    assert result.expected_value_per10 is None
+    assert errors == [
+        {
+            "ticker": asset.ticker,
+            "error_message": f"structural_invalid: {validate_asset_analysis(asset)[1]}",
+        }
+    ]
+    assert reason_fragment in errors[0]["error_message"]
+
+
+def test_valid_asset_guardrail_regression_preserves_scoring_bet_size_and_delta():
+    asset = _make_analysis("AAPL")
+
+    ranked, errors = score_and_rank_with_errors(
+        [asset],
+        hit_rate=0.35,
+        hit_rate_source="assumed",
+        prior_scores={"AAPL": 60.0},
+        min_rr=3.0,
+        top_n=5,
+    )
+
+    assert errors == []
+    assert len(ranked) == 1
+    result = ranked[0]
+    assert result.rank == 1
+    assert result.score is not None
+    assert result.score_delta == round(result.score - 60.0, 2)
+    assert result.expected_gain_per10 == 3.0
+    assert result.expected_loss_per10 == 1.0
+    assert result.expected_value_per10 is not None
+    assert result.hit_rate_used == 0.35
+    assert result.hit_rate_source == "assumed"
+
+
+def test_structural_errors_are_reported_per_ticker():
+    assets = [
+        _make_analysis("BAD_STOP", stop_loss=100.0),
+        _make_analysis("BAD_TARGET", target_price=100.0),
+        _make_analysis("VALID"),
+    ]
+
+    ranked, errors = score_and_rank_with_errors(assets, min_rr=3.0, top_n=5)
+
+    assert {error["ticker"] for error in errors} == {"BAD_STOP", "BAD_TARGET"}
+    assert all(error["error_message"].startswith("structural_invalid:") for error in errors)
+    assert next(asset for asset in ranked if asset.ticker == "VALID").rank == 1
 
 
 def test_filters_below_min_rr():
@@ -140,15 +242,17 @@ def test_bet_size_division_by_zero():
     assert result.expected_value_per10 == 0.0
 
 
-async def _db_with_outcomes(n_total: int, n_wins: int) -> aiosqlite.Connection:
+async def _db_with_outcomes(n_total: int, n_hits: int) -> aiosqlite.Connection:
     db = await aiosqlite.connect(":memory:")
+    db.row_factory = aiosqlite.Row
     await db.execute(
-        "CREATE TABLE signal_outcomes (id TEXT PRIMARY KEY, user_id TEXT, outcome TEXT)"
+        "CREATE TABLE analysis_results "
+        "(id TEXT PRIMARY KEY, user_id TEXT, outcome TEXT)"
     )
     for i in range(n_total):
-        outcome = "win" if i < n_wins else "loss"
+        outcome = "TARGET_HIT" if i < n_hits else "STOP_HIT"
         await db.execute(
-            "INSERT INTO signal_outcomes VALUES (?, 'default', ?)", (str(i), outcome)
+            "INSERT INTO analysis_results VALUES (?, 'default', ?)", (str(i), outcome)
         )
     await db.commit()
     return db
@@ -173,12 +277,13 @@ async def test_ev_switch_realized():
     finally:
         await db.close()
     assert rate == pytest.approx(12 / 30)
-    assert source == "realized"
+    assert source == "observed"
 
 
 @pytest.mark.asyncio
 async def test_get_hit_rate_fallback():
     db = await aiosqlite.connect(":memory:")
+    db.row_factory = aiosqlite.Row
     try:
         rate, source = await _get_hit_rate(db)
     finally:

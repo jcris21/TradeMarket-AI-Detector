@@ -12,6 +12,23 @@ from .schema import DEFAULT_USER_ID
 
 logger = logging.getLogger(__name__)
 
+FRESHNESS_THRESHOLDS = {"fresh": 2.0, "active": 5.0, "aged": 24.0}
+
+
+def compute_freshness(analyzed_at: str) -> dict:
+    """Return freshness_status and freshness_age_hours derived from an ISO UTC timestamp."""
+    dt = datetime.fromisoformat(analyzed_at.replace("Z", "+00:00"))
+    age_hours = (datetime.now(timezone.utc) - dt).total_seconds() / 3600
+    if age_hours < FRESHNESS_THRESHOLDS["fresh"]:
+        status = "fresh"
+    elif age_hours < FRESHNESS_THRESHOLDS["active"]:
+        status = "active"
+    elif age_hours < FRESHNESS_THRESHOLDS["aged"]:
+        status = "aged"
+    else:
+        status = "expired"
+    return {"freshness_status": status, "freshness_age_hours": round(age_hours, 2)}
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -405,6 +422,132 @@ async def save_analysis_results(
     return write_errors
 
 
+async def update_outcome_atomic(
+    signal_id: str,
+    outcome: str,
+    gain_pct: float,
+    loss_pct: float,
+    hold_days: float,
+    support_break_level: str | None = None,
+) -> bool:
+    """Write outcome for a signal only if outcome IS NULL (atomic guard).
+
+    Returns True if the row was updated, False if already written (idempotent skip).
+    """
+    db = await get_connection()
+    try:
+        cursor = await db.execute(
+            "UPDATE analysis_results "
+            "SET outcome = ?, actual_gain_pct = ?, actual_loss_pct = ?, hold_days = ?, "
+            "support_break_level = ? "
+            "WHERE id = ? AND outcome IS NULL",
+            (outcome, gain_pct, loss_pct, hold_days, support_break_level, signal_id),
+        )
+        await db.commit()
+        return cursor.rowcount > 0
+    finally:
+        await db.close()
+
+
+async def get_performance_summary(user_id: str = DEFAULT_USER_ID) -> dict:
+    """Compute aggregated outcome metrics from analysis_results."""
+    db = await get_connection()
+    try:
+        cursor = await db.execute(
+            "SELECT outcome, actual_gain_pct, actual_loss_pct FROM analysis_results "
+            "WHERE user_id = ? AND outcome IS NOT NULL",
+            (user_id,),
+        )
+        rows = await cursor.fetchall()
+        orphan_cursor = await db.execute(
+            "SELECT COUNT(*) as cnt FROM analysis_results "
+            "WHERE user_id = ? AND outcome IS NULL "
+            "AND (julianday('now') - julianday(analyzed_at)) > 35",
+            (user_id,),
+        )
+        orphan_row = await orphan_cursor.fetchone()
+        orphaned_count = orphan_row["cnt"] if orphan_row else 0
+    finally:
+        await db.close()
+
+    target_hits = sum(1 for r in rows if r["outcome"] == "TARGET_HIT")
+    stop_hits = sum(1 for r in rows if r["outcome"] == "STOP_HIT")
+    expired = sum(1 for r in rows if r["outcome"] == "EXPIRED")
+
+    conclusive = target_hits + stop_hits
+    phase_gate_active = conclusive < 30
+
+    total_gain = sum(
+        r["actual_gain_pct"] for r in rows
+        if r["outcome"] == "TARGET_HIT" and r["actual_gain_pct"] is not None
+    )
+    total_loss = sum(
+        r["actual_loss_pct"] for r in rows
+        if r["outcome"] == "STOP_HIT" and r["actual_loss_pct"] is not None
+    )
+
+    if phase_gate_active:
+        hit_ratio: float | None = None
+        profit_factor: float | None = None
+        realized_rr: float | None = None
+        hr_status: str | None = None
+        pf_status: str | None = None
+        rr_status: str | None = None
+        below_breakeven = False
+    else:
+        hit_ratio = round(target_hits / conclusive, 4)
+
+        if total_loss > 0:
+            profit_factor = round(total_gain / total_loss, 4)
+        elif total_gain > 0:
+            profit_factor = 999.0
+        else:
+            profit_factor = 0.0
+
+        avg_gain = total_gain / target_hits if target_hits > 0 else 0.0
+        avg_loss = total_loss / stop_hits if stop_hits > 0 else 0.0
+        realized_rr = round(avg_gain / avg_loss, 2) if avg_loss > 0 else None
+
+        if hit_ratio >= 0.35:
+            hr_status = "green"
+        elif hit_ratio < 0.25:
+            hr_status = "red"
+        else:
+            hr_status = "neutral"
+
+        if profit_factor >= 1.3:
+            pf_status = "green"
+        elif profit_factor < 1.0:
+            pf_status = "red"
+        else:
+            pf_status = None
+
+        rr_status = "green" if realized_rr is not None and realized_rr >= 2.1 else None
+        below_breakeven = hit_ratio < 0.25
+
+    logger.debug(
+        "get_performance_summary: conclusive=%d phase_gate_active=%s",
+        conclusive, phase_gate_active,
+    )
+
+    return {
+        "total_signals": len(rows),
+        "target_hits": target_hits,
+        "stop_hits": stop_hits,
+        "expired": expired,
+        "orphaned_count": orphaned_count,
+        "phase_gate_active": phase_gate_active,
+        "calibration_count": conclusive,
+        "hit_ratio": hit_ratio,
+        "profit_factor": profit_factor,
+        "realized_rr": realized_rr,
+        "hr_status": hr_status,
+        "pf_status": pf_status,
+        "rr_status": rr_status,
+        "below_breakeven": below_breakeven,
+    }
+
+
 def _parse_analysis_row(row) -> dict:
     """Convert a DB analysis_results row to a frontend-compatible dict."""
     d = dict(row)
@@ -414,6 +557,8 @@ def _parse_analysis_row(row) -> dict:
             d["indicators_summary"] = json.loads(raw)
         except (json.JSONDecodeError, ValueError):
             d["indicators_summary"] = {}
+    if d.get("analyzed_at"):
+        d.update(compute_freshness(d["analyzed_at"]))
     return d
 
 

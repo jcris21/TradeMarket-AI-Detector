@@ -102,7 +102,7 @@ export default function Home() {
           </div>
 
           {/* Opportunities Panel */}
-          <div className="h-48 border-t border-border shrink-0">
+          <div className="h-[264px] border-t border-border shrink-0">
             <OpportunitiesPanel
               onTickerSelect={setUserSelectedTicker}
               onInjectChat={setChatInjectedMessage}

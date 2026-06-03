@@ -4,8 +4,12 @@ import asyncio
 import logging
 
 import pandas as pd
-import pandas_ta as ta
 import yfinance as yf
+
+try:
+    import pandas_ta as ta
+except ImportError:
+    ta = None  # type: ignore[assignment]
 
 from .models import DataFetchError, TechnicalIndicators
 
@@ -81,6 +85,8 @@ def _pick_nearest(levels: list[float], price: float, above: bool, n: int = 2) ->
 
 def _compute_indicators(ticker: str, df: pd.DataFrame) -> TechnicalIndicators:
     """Compute MACD, RSI, volume ratio, and S/R levels from OHLCV DataFrame."""
+    if ta is None:
+        raise DataFetchError("pandas-ta is not installed (requires Python 3.12+)")
     if df.empty or len(df) < 30:
         raise DataFetchError(ticker)
 

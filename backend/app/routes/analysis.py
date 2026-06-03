@@ -10,9 +10,10 @@ from app.db import (
     get_analysis_by_ticker,
     get_analysis_tickers,
     get_latest_analysis,
+    get_performance_summary,
     remove_analysis_ticker,
 )
-from app.analysis.models import InvestingComAuthError
+from app.analysis.models import InvestingComAuthError, PerformanceResponse
 from app.analysis.orchestrator import run_analysis
 
 logger = logging.getLogger(__name__)
@@ -89,6 +90,12 @@ async def remove_ticker(ticker: str):
     if not removed:
         raise HTTPException(status_code=404, detail=f"{ticker} not in analysis list")
     return {"ticker": ticker, "removed": True}
+
+
+@router.get("/performance", response_model=PerformanceResponse)
+async def get_performance():
+    """Return aggregated outcome performance metrics."""
+    return await get_performance_summary()
 
 
 @router.get("/{ticker}")

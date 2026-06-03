@@ -93,3 +93,22 @@ class DataFetchError(Exception):
 class InvestingComAuthError(Exception):
     """Raised when Playwright cannot log in to investing.com."""
     pass
+
+
+class PerformanceResponse(BaseModel):
+    """Response shape for GET /api/analysis/performance."""
+
+    phase_gate_active: bool
+    calibration_count: int
+    total_signals: int
+    target_hits: int
+    stop_hits: int
+    expired: int
+    orphaned_count: int
+    hit_ratio: float | None
+    profit_factor: float | None
+    realized_rr: float | None
+    hr_status: str | None
+    pf_status: str | None
+    rr_status: str | None
+    below_breakeven: bool

@@ -7,6 +7,33 @@ import aiosqlite
 from .models import AssetAnalysis
 
 
+def validate_asset_analysis(asset: AssetAnalysis) -> tuple[bool, str]:
+    """Guardrail layer: validate structural invariants from LLM output."""
+    if asset.entry_price <= 0:
+        return False, "entry_price <= 0"
+    if asset.stop_loss >= asset.entry_price:
+        return False, "stop_loss >= entry_price (inverted stop)"
+    if asset.target_price <= asset.entry_price:
+        return False, "target_price <= entry_price (inverted target)"
+    if asset.risk_reward_ratio < 0:
+        return False, "negative risk_reward_ratio"
+    return True, ""
+
+
+def _quarantine_invalid_asset(asset: AssetAnalysis) -> AssetAnalysis:
+    """Return an unranked asset with no derived scoring fields."""
+    return asset.model_copy(update={
+        "score": None,
+        "score_delta": None,
+        "rank": None,
+        "expected_gain_per10": None,
+        "expected_loss_per10": None,
+        "expected_value_per10": None,
+        "hit_rate_used": None,
+        "hit_rate_source": None,
+    })
+
+
 def _indicator_confluence_score(summary: dict) -> float:
     """Return 0–100 based on how many indicators are bullish."""
     bullish_count = 0
@@ -78,18 +105,20 @@ async def _get_prior_scores(db: aiosqlite.Connection) -> dict[str, float]:
 
 
 async def _get_hit_rate(db: aiosqlite.Connection) -> tuple[float, str]:
-    """Query signal_outcomes for realized hit rate. Falls back to 35% assumed if table absent or < 30 rows."""
+    """Return (hit_rate, source). Falls back to 0.35 'assumed' if conclusive < 30."""
     try:
         cursor = await db.execute(
-            "SELECT COUNT(*) AS total, "
-            "SUM(CASE WHEN outcome = 'win' THEN 1 ELSE 0 END) AS wins "
-            "FROM signal_outcomes WHERE user_id = 'default'"
+            "SELECT "
+            "  SUM(CASE WHEN outcome = 'TARGET_HIT' THEN 1 ELSE 0 END) AS hits, "
+            "  SUM(CASE WHEN outcome IN ('TARGET_HIT', 'STOP_HIT') THEN 1 ELSE 0 END) AS conclusive "
+            "FROM analysis_results "
+            "WHERE user_id = 'default' AND outcome IN ('TARGET_HIT', 'STOP_HIT')"
         )
         row = await cursor.fetchone()
-        total = row[0] if row else 0
-        wins = int(row[1]) if row and row[1] is not None else 0
-        if total >= 30:
-            return wins / total, "realized"
+        conclusive = int(row["conclusive"]) if row and row["conclusive"] else 0
+        hits = int(row["hits"]) if row and row["hits"] else 0
+        if conclusive >= 30:
+            return round(hits / conclusive, 4), "observed"
     except aiosqlite.OperationalError:
         pass
     return 0.35, "assumed"
@@ -108,6 +137,26 @@ def score_and_rank(
     Returns all assets (not just Top N) with .rank and .score populated.
     Assets that don't qualify have rank=None.
     """
+    ranked, _errors = score_and_rank_with_errors(
+        analyses,
+        hit_rate=hit_rate,
+        hit_rate_source=hit_rate_source,
+        prior_scores=prior_scores,
+        min_rr=min_rr,
+        top_n=top_n,
+    )
+    return ranked
+
+
+def score_and_rank_with_errors(
+    analyses: list[AssetAnalysis],
+    hit_rate: float = 0.35,
+    hit_rate_source: str = "assumed",
+    prior_scores: dict[str, float] | None = None,
+    min_rr: float | None = None,
+    top_n: int | None = None,
+) -> tuple[list[AssetAnalysis], list[dict[str, str]]]:
+    """Filter, score, and rank analyses, returning structural validation errors."""
     if min_rr is None:
         min_rr = float(os.environ.get("ANALYSIS_MIN_RR_RATIO", "3.0"))
     if top_n is None:
@@ -115,7 +164,17 @@ def score_and_rank(
 
     _prior = prior_scores or {}
     scored: list[AssetAnalysis] = []
+    errors: list[dict[str, str]] = []
     for asset in analyses:
+        valid, reason = validate_asset_analysis(asset)
+        if not valid:
+            errors.append({
+                "ticker": asset.ticker,
+                "error_message": f"structural_invalid: {reason}",
+            })
+            scored.append(_quarantine_invalid_asset(asset))
+            continue
+
         s = _compute_score(asset)
         delta = round(s - _prior.get(asset.ticker, s), 2)
         with_score = asset.model_copy(update={"score": s, "score_delta": delta})
@@ -124,7 +183,8 @@ def score_and_rank(
     # Separate qualifying from non-qualifying
     def qualifies(a: AssetAnalysis) -> bool:
         return (
-            a.risk_reward_ratio >= min_rr
+            a.score is not None
+            and a.risk_reward_ratio >= min_rr
             and a.signal in ("BUY", "WAIT")
         )
 
@@ -141,4 +201,4 @@ def score_and_rank(
     for asset in not_qualifying:
         ranked.append(asset.model_copy(update={"rank": None}))
 
-    return ranked
+    return ranked, errors

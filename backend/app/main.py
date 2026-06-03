@@ -2,12 +2,15 @@
 
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 
+from app.analysis.outcome_detector import OutcomeDetector
 from app.db import get_cash_balance, get_positions, get_watchlist, init_db, insert_snapshot
 from app.market import PriceCache, create_market_data_source, create_stream_router
 from app.routes import analysis, chat, market, portfolio, watchlist
@@ -59,9 +62,24 @@ async def lifespan(app: FastAPI):
     cash = await get_cash_balance()
     await insert_snapshot(round(cash, 2))
 
+    # Start nightly outcome detector scheduler
+    cron_hour = int(os.environ.get("OUTCOME_DETECTOR_CRON_HOUR", "2"))
+    scheduler = AsyncIOScheduler()
+
+    async def _run_outcome_detector():
+        try:
+            await OutcomeDetector().run()
+        except Exception:
+            logger.exception("OutcomeDetector scheduled run failed")
+
+    scheduler.add_job(_run_outcome_detector, "cron", hour=cron_hour)
+    scheduler.start()
+    logger.info("OutcomeDetector scheduler started (hour=%d UTC)", cron_hour)
+
     yield
 
     # Shutdown
+    scheduler.shutdown(wait=False)
     snapshot_task.cancel()
     try:
         await snapshot_task

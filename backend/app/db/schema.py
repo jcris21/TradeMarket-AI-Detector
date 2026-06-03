@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS analysis_results (
     ticker TEXT NOT NULL,
     rank INTEGER,
     score REAL,
+    score_delta REAL,
     signal TEXT,
     confidence REAL,
     risk_reward_ratio REAL,
@@ -68,7 +69,17 @@ CREATE TABLE IF NOT EXISTS analysis_results (
     argument TEXT,
     indicators_summary TEXT,
     screenshot_path TEXT,
-    analyzed_at TEXT NOT NULL
+    analyzed_at TEXT NOT NULL,
+    expected_gain_per10 REAL,
+    expected_loss_per10 REAL,
+    expected_value_per10 REAL,
+    hit_rate_used REAL,
+    hit_rate_source TEXT,
+    outcome TEXT,
+    actual_gain_pct REAL,
+    actual_loss_pct REAL,
+    hold_days REAL,
+    support_break_level TEXT
 );
 
 CREATE TABLE IF NOT EXISTS analysis_tickers (
