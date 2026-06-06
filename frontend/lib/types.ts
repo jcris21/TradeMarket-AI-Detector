@@ -121,6 +121,8 @@ export interface AssetAnalysis {
   hit_rate_used?: number | null;
   hit_rate_source?: string | null;
   outcome?: "TARGET_HIT" | "STOP_HIT" | "EXPIRED" | null;
+  atr_14_pct?: number | null;
+  stop_viable?: boolean | null;
 }
 
 /** Response from POST /api/analysis/run */

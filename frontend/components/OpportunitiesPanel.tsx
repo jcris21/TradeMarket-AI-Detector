@@ -87,6 +87,7 @@ function SignalTable({
           <th className="px-3 py-0 text-label-caps">Stop</th>
           <th className="px-3 py-0 text-label-caps">Señal</th>
           <th className="px-3 py-0 text-label-caps">Freshness</th>
+          <th className="px-3 py-0 text-label-caps">ATR</th>
           <th className="px-3 py-0 text-label-caps">Bet Size</th>
         </tr>
       </thead>
@@ -123,6 +124,17 @@ function SignalTable({
                     status={asset.freshness_status}
                     ageHours={asset.freshness_age_hours}
                   />
+                ) : (
+                  <span className="text-text-muted">—</span>
+                )}
+              </td>
+              <td className="px-3 py-0 font-mono">
+                {asset.atr_14_pct == null ? (
+                  <span className="text-text-muted">—</span>
+                ) : asset.stop_viable === true ? (
+                  <span className="text-gain">✔ ATR</span>
+                ) : asset.stop_viable === false ? (
+                  <span className="text-loss">❌ ATR</span>
                 ) : (
                   <span className="text-text-muted">—</span>
                 )}

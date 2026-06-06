@@ -65,8 +65,18 @@ async def run_analysis(tickers: list[str]) -> AnalysisResult:
         screenshot = screenshots.get(ticker)
         return await analyze_asset(indicators, screenshot)
 
-    vision_tasks = [_vision_one(t) for t in successful]
-    analyses: list[AssetAnalysis] = await asyncio.gather(*vision_tasks)
+    ticker_list = list(successful.keys())
+    vision_tasks = [_vision_one(t) for t in ticker_list]
+    raw_analyses: list[AssetAnalysis] = await asyncio.gather(*vision_tasks)
+
+    # Inject ATR values from Stage-1 indicators into each AssetAnalysis
+    analyses: list[AssetAnalysis] = [
+        asset.model_copy(update={
+            "atr_14": successful[ticker].atr_14,
+            "atr_14_pct": successful[ticker].atr_14_pct,
+        })
+        for ticker, asset in zip(ticker_list, raw_analyses)
+    ]
 
     # Stage 4: Score and rank (with bet-size pre-computation)
     logger.info("Stage 4: scoring and ranking %d analyses", len(analyses))

@@ -66,3 +66,65 @@ async def test_empty_dataframe_raises_data_fetch_error(mock_download):
     with pytest.raises(DataFetchError) as exc_info:
         await fetch_indicators("FAKE")
     assert exc_info.value.ticker == "FAKE"
+
+
+@patch("app.analysis.data_agent.ta")
+@patch("app.analysis.data_agent.yf.download")
+async def test_atr_computed_when_available(mock_download, mock_ta):
+    """ATR fields are set correctly when ta.atr() returns valid data."""
+    df = _make_ohlcv(60)
+    # Override close prices so current_price == 100.0
+    df["Close"] = 100.0
+    df["High"] = 101.0
+    df["Low"] = 99.0
+    mock_download.return_value = df
+
+    # Mock MACD, RSI, SMA so _compute_indicators doesn't fail on them
+    macd_df = pd.DataFrame(
+        {"MACD_12_26_9": [0.5], "MACDs_12_26_9": [0.3], "MACDh_12_26_9": [0.2]},
+        index=df.index[-1:],
+    )
+    # Pad MACD df to length of df for iloc[-2]
+    macd_full = pd.DataFrame(
+        {
+            "MACD_12_26_9": [0.3] * (len(df) - 1) + [0.5],
+            "MACDs_12_26_9": [0.2] * (len(df) - 1) + [0.3],
+            "MACDh_12_26_9": [-0.1] * (len(df) - 1) + [0.2],
+        },
+        index=df.index,
+    )
+    mock_ta.macd.return_value = macd_full
+    mock_ta.rsi.return_value = pd.Series([55.0] * len(df), index=df.index)
+    mock_ta.sma.return_value = pd.Series([1_000_000.0] * len(df), index=df.index)
+    mock_ta.atr.return_value = pd.Series([5.0] * len(df), index=df.index)
+
+    result = await fetch_indicators("AAPL")
+
+    assert result.atr_14 == 5.0
+    assert result.atr_14_pct == pytest.approx(0.05, rel=1e-4)
+
+
+@patch("app.analysis.data_agent.ta")
+@patch("app.analysis.data_agent.yf.download")
+async def test_atr_none_when_ta_returns_none(mock_download, mock_ta):
+    """ATR fields are None when ta.atr() returns None."""
+    df = _make_ohlcv(60)
+    mock_download.return_value = df
+
+    macd_full = pd.DataFrame(
+        {
+            "MACD_12_26_9": [0.3] * (len(df) - 1) + [0.5],
+            "MACDs_12_26_9": [0.2] * (len(df) - 1) + [0.3],
+            "MACDh_12_26_9": [-0.1] * (len(df) - 1) + [0.2],
+        },
+        index=df.index,
+    )
+    mock_ta.macd.return_value = macd_full
+    mock_ta.rsi.return_value = pd.Series([55.0] * len(df), index=df.index)
+    mock_ta.sma.return_value = pd.Series([1_000_000.0] * len(df), index=df.index)
+    mock_ta.atr.return_value = None
+
+    result = await fetch_indicators("AAPL")
+
+    assert result.atr_14 is None
+    assert result.atr_14_pct is None

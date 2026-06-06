@@ -246,6 +246,11 @@ _OUTCOME_COLUMNS = [
     ("hold_days", "REAL"),
 ]
 
+_ATR_COLUMNS = [
+    ("stop_viable", "INTEGER"),
+    ("atr_14_pct", "REAL"),
+]
+
 
 async def init_db() -> None:
     """Create tables and seed default data if needed."""
@@ -255,7 +260,7 @@ async def init_db() -> None:
         await db.executescript(SCHEMA_SQL)
 
         # Lazy migration: add columns if not already present
-        for col, col_type in _BET_SIZE_COLUMNS + _OUTCOME_COLUMNS:
+        for col, col_type in _BET_SIZE_COLUMNS + _OUTCOME_COLUMNS + _ATR_COLUMNS:
             try:
                 await db.execute(
                     f"ALTER TABLE analysis_results ADD COLUMN {col} {col_type}"

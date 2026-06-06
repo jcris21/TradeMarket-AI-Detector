@@ -6,6 +6,53 @@ import aiosqlite
 
 from .models import AssetAnalysis
 
+# ATR viability constants
+_ATR_HARD_FLOOR = 0.5
+_ATR_BOOST_THRESHOLD = 1.5
+_ATR_PENALTY_PTS = -15.0
+_ATR_BOOST_PTS = 8.0
+
+
+def _atr_floor_factor() -> float:
+    """Return the ATR soft-penalty floor factor from env var, default 0.8."""
+    return float(os.environ.get("ANALYSIS_ATR_FLOOR", "0.8"))
+
+
+def _compute_atr_viability(asset: AssetAnalysis) -> tuple[bool, bool, float]:
+    """Compute ATR stop viability.
+
+    Returns (hard_disqualify, stop_viable, atr_viability_pts).
+    """
+    if asset.atr_14_pct is None:
+        # ATR unavailable — pass through, no penalty
+        return False, True, 0.0
+
+    if asset.entry_price <= 0:
+        return False, True, 0.0
+
+    stop_distance_pct = (asset.entry_price - asset.stop_loss) / asset.entry_price
+    atr = asset.atr_14_pct
+    floor_factor = _atr_floor_factor()
+
+    hard_floor = _ATR_HARD_FLOOR * atr
+    soft_floor = floor_factor * atr
+    boost_threshold = _ATR_BOOST_THRESHOLD * atr
+
+    if stop_distance_pct < hard_floor:
+        # Hard disqualify: stop inside ATR noise floor
+        return True, False, 0.0
+
+    if stop_distance_pct < soft_floor:
+        # Soft penalty band
+        return False, False, _ATR_PENALTY_PTS
+
+    if stop_distance_pct > boost_threshold:
+        # Boost band: well-placed stop
+        return False, True, _ATR_BOOST_PTS
+
+    # Neutral band
+    return False, True, 0.0
+
 
 def validate_asset_analysis(asset: AssetAnalysis) -> tuple[bool, str]:
     """Guardrail layer: validate structural invariants from LLM output."""
@@ -55,14 +102,15 @@ def _indicator_confluence_score(summary: dict) -> float:
     return (bullish_count / 3) * 100
 
 
-def _compute_score(asset: AssetAnalysis) -> float:
+def _compute_score(asset: AssetAnalysis, atr_viability_pts: float = 0.0) -> float:
     """Composite score 0–100."""
     confidence_component = asset.confidence * 40
     rr_normalized = min(asset.risk_reward_ratio / 6.0, 1.0) * 100
     rr_component = rr_normalized * 0.35
     confluence = _indicator_confluence_score(asset.indicators_summary)
     confluence_component = confluence * 0.25
-    return round(confidence_component + rr_component + confluence_component, 2)
+    raw = confidence_component + rr_component + confluence_component + atr_viability_pts
+    return round(max(0.0, min(100.0, raw)), 2)
 
 
 def _compute_bet_size(asset: AssetAnalysis, hit_rate: float, source: str) -> AssetAnalysis:
@@ -175,9 +223,26 @@ def score_and_rank_with_errors(
             scored.append(_quarantine_invalid_asset(asset))
             continue
 
-        s = _compute_score(asset)
+        # ATR viability gate
+        hard_disqualify, stop_viable, atr_pts = _compute_atr_viability(asset)
+        if hard_disqualify:
+            errors.append({
+                "ticker": asset.ticker,
+                "error_message": "atr_disqualify: stop inside ATR noise floor",
+            })
+            quarantined = _quarantine_invalid_asset(asset)
+            scored.append(quarantined.model_copy(update={"stop_viable": False}))
+            continue
+
+        s = _compute_score(asset, atr_viability_pts=atr_pts)
         delta = round(s - _prior.get(asset.ticker, s), 2)
-        with_score = asset.model_copy(update={"score": s, "score_delta": delta})
+        # stop_viable=None means ATR data was unavailable (pass-through)
+        actual_stop_viable = stop_viable if asset.atr_14_pct is not None else None
+        with_score = asset.model_copy(update={
+            "score": s,
+            "score_delta": delta,
+            "stop_viable": actual_stop_viable,
+        })
         scored.append(_compute_bet_size(with_score, hit_rate, hit_rate_source))
 
     # Separate qualifying from non-qualifying

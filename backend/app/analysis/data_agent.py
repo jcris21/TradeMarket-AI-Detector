@@ -128,6 +128,18 @@ def _compute_indicators(ticker: str, df: pd.DataFrame) -> TechnicalIndicators:
 
     current_price = float(close.iloc[-1])
 
+    # ATR (14) — absolute and as % of current price
+    atr_14: float | None = None
+    atr_14_pct: float | None = None
+    try:
+        atr_series = ta.atr(high, low, close, length=14)
+        if atr_series is not None and not pd.isna(atr_series.iloc[-1]) and current_price > 0:
+            atr_14 = round(float(atr_series.iloc[-1]), 4)
+            atr_14_pct = round(atr_14 / current_price, 6)
+    except Exception:
+        atr_14 = None
+        atr_14_pct = None
+
     # Support / Resistance — swing levels + volume profile, clustered
     swing_sup, swing_res = _swing_levels(high, low, n=5)
     vp_levels = _volume_profile_levels(close, volume, n_bins=30, top_n=6)
@@ -159,6 +171,8 @@ def _compute_indicators(ticker: str, df: pd.DataFrame) -> TechnicalIndicators:
         support_2=round(nearest_sup[1], 2),
         resistance_1=round(nearest_res[0], 2),
         resistance_2=round(nearest_res[1], 2),
+        atr_14=atr_14,
+        atr_14_pct=atr_14_pct,
     )
 
 

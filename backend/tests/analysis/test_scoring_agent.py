@@ -6,6 +6,7 @@ import aiosqlite
 from app.analysis.models import AssetAnalysis
 from app.analysis.scoring_agent import (
     _compute_bet_size,
+    _compute_score,
     _get_hit_rate,
     _get_prior_scores,
     score_and_rank,
@@ -364,3 +365,144 @@ async def test_score_delta_db_error():
     ranked = score_and_rank([asset], min_rr=3.0, top_n=5, prior_scores=prior)
     aapl = next(a for a in ranked if a.ticker == "AAPL")
     assert aapl.score_delta == 0.0
+
+
+# ── ATR viability tests (story-005) ──────────────────────────────────────────
+
+def _make_atr_analysis(
+    ticker: str,
+    stop_distance_pct: float,
+    atr_14_pct: float | None,
+    rr_ratio: float = 4.0,
+    confidence: float = 0.8,
+) -> AssetAnalysis:
+    """Build an AssetAnalysis with given stop_distance_pct and atr_14_pct."""
+    entry = 100.0
+    stop = round(entry * (1.0 - stop_distance_pct), 4)
+    # Set target so RR = rr_ratio
+    target = round(entry + rr_ratio * (entry - stop), 4)
+    return AssetAnalysis(
+        ticker=ticker,
+        signal="BUY",
+        confidence=confidence,
+        entry_price=entry,
+        target_price=target,
+        stop_loss=stop,
+        risk_reward_ratio=rr_ratio,
+        support_validated=True,
+        indicators_summary={"macd": "bullish_crossover", "rsi": 55.0, "volume": "above_avg"},
+        argument="ATR test.",
+        atr_14_pct=atr_14_pct,
+    )
+
+
+def test_atr_hard_disqualify():
+    """stop_distance_pct < 0.5 * atr_14_pct → rank=None, error contains atr_disqualify:"""
+    # stop_dist=0.03, atr=0.08 → 0.03 < 0.04 (hard floor)
+    asset = _make_atr_analysis("HARD", stop_distance_pct=0.03, atr_14_pct=0.08)
+    ranked, errors = score_and_rank_with_errors([asset], min_rr=3.0, top_n=5)
+
+    assert len(ranked) == 1
+    result = ranked[0]
+    assert result.rank is None
+    assert result.stop_viable is False
+    assert any("atr_disqualify:" in e["error_message"] for e in errors)
+    assert errors[0]["ticker"] == "HARD"
+
+
+def test_atr_soft_penalty():
+    """stop_distance_pct in soft-penalty band → stop_viable=False, score 15 pts below baseline"""
+    # stop_dist=0.05, atr=0.08 → 0.05 in [0.04, 0.064) → soft penalty -15 pts
+    asset = _make_atr_analysis("SOFT", stop_distance_pct=0.05, atr_14_pct=0.08, rr_ratio=4.0)
+    baseline_asset = _make_atr_analysis("BASE", stop_distance_pct=0.05, atr_14_pct=None, rr_ratio=4.0)
+
+    ranked_soft, _ = score_and_rank_with_errors([asset], min_rr=3.0, top_n=5)
+    ranked_base, _ = score_and_rank_with_errors([baseline_asset], min_rr=3.0, top_n=5)
+
+    soft_score = next(a.score for a in ranked_soft if a.ticker == "SOFT")
+    base_score = next(a.score for a in ranked_base if a.ticker == "BASE")
+
+    assert soft_score is not None
+    assert base_score is not None
+    assert abs((base_score - soft_score) - 15.0) < 0.01
+    soft_result = next(a for a in ranked_soft if a.ticker == "SOFT")
+    assert soft_result.stop_viable is False
+
+
+def test_atr_neutral_band():
+    """stop_distance_pct in neutral band → stop_viable=True, score unchanged"""
+    # stop_dist=0.08, atr=0.08 → 0.08 in [0.064, 0.12] → neutral
+    asset = _make_atr_analysis("NEUTRAL", stop_distance_pct=0.08, atr_14_pct=0.08, rr_ratio=4.0)
+    baseline_asset = _make_atr_analysis("BASE", stop_distance_pct=0.08, atr_14_pct=None, rr_ratio=4.0)
+
+    ranked_neutral, _ = score_and_rank_with_errors([asset], min_rr=3.0, top_n=5)
+    ranked_base, _ = score_and_rank_with_errors([baseline_asset], min_rr=3.0, top_n=5)
+
+    neutral_score = next(a.score for a in ranked_neutral if a.ticker == "NEUTRAL")
+    base_score = next(a.score for a in ranked_base if a.ticker == "BASE")
+
+    assert neutral_score == base_score
+    neutral_result = next(a for a in ranked_neutral if a.ticker == "NEUTRAL")
+    assert neutral_result.stop_viable is True
+
+
+def test_atr_boost():
+    """stop_distance_pct > 1.5 * atr_14_pct → stop_viable=True, score 8 pts above baseline"""
+    # stop_dist=0.15, atr=0.08 → 0.15 > 0.12 → boost +8 pts
+    asset = _make_atr_analysis("BOOST", stop_distance_pct=0.15, atr_14_pct=0.08, rr_ratio=4.0)
+    baseline_asset = _make_atr_analysis("BASE", stop_distance_pct=0.15, atr_14_pct=None, rr_ratio=4.0)
+
+    ranked_boost, _ = score_and_rank_with_errors([asset], min_rr=3.0, top_n=5)
+    ranked_base, _ = score_and_rank_with_errors([baseline_asset], min_rr=3.0, top_n=5)
+
+    boost_score = next(a.score for a in ranked_boost if a.ticker == "BOOST")
+    base_score = next(a.score for a in ranked_base if a.ticker == "BASE")
+
+    assert boost_score is not None
+    assert base_score is not None
+    assert abs((boost_score - base_score) - 8.0) < 0.01
+    boost_result = next(a for a in ranked_boost if a.ticker == "BOOST")
+    assert boost_result.stop_viable is True
+
+
+def test_atr_none_fallback():
+    """Asset with atr_14_pct=None passes scoring unchanged with stop_viable=None."""
+    asset = _make_atr_analysis("NOATR", stop_distance_pct=0.10, atr_14_pct=None, rr_ratio=4.0)
+
+    ranked, errors = score_and_rank_with_errors([asset], min_rr=3.0, top_n=5)
+    result = next(a for a in ranked if a.ticker == "NOATR")
+
+    # No ATR errors
+    atr_errors = [e for e in errors if "atr_disqualify" in e.get("error_message", "")]
+    assert atr_errors == []
+
+    # stop_viable should be None (ATR data unavailable)
+    assert result.stop_viable is None
+
+    # Score should match baseline (no ATR adjustment)
+    baseline_score = _compute_score(asset)
+    assert result.score == baseline_score
+
+
+def test_atr_regression_rank_order_preserved():
+    """Signals with ATR-neutral stop distances maintain rank order from pre-feature baseline."""
+    # These signals all have stop_distance_pct in the neutral band (no ATR adjustment).
+    # Rank order should follow score formula as before.
+    assets = [
+        _make_atr_analysis("HIGH", stop_distance_pct=0.10, atr_14_pct=0.08,
+                            confidence=0.9, rr_ratio=5.0),
+        _make_atr_analysis("MID", stop_distance_pct=0.10, atr_14_pct=0.08,
+                            confidence=0.7, rr_ratio=4.0),
+        _make_atr_analysis("LOW", stop_distance_pct=0.10, atr_14_pct=0.08,
+                            confidence=0.5, rr_ratio=3.0),
+    ]
+
+    ranked, errors = score_and_rank_with_errors(assets, min_rr=3.0, top_n=5)
+    atr_errors = [e for e in errors if "atr_disqualify" in e.get("error_message", "")]
+    assert atr_errors == []
+
+    qualifiers = [a for a in ranked if a.rank is not None]
+    assert len(qualifiers) == 3
+    assert qualifiers[0].ticker == "HIGH"
+    assert qualifiers[1].ticker == "MID"
+    assert qualifiers[2].ticker == "LOW"
