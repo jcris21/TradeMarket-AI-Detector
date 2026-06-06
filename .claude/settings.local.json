@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(& \"E:\\\\FILES 2026\\\\MVP_VIBECODE+AGENTIC\\\\finally\\\\backend\\\\.venv\\\\Scripts\\\\python.exe\" -m pip show aiohttp 2>&1)",
+      "PowerShell(netstat *)"
+    ]
+  }
+}

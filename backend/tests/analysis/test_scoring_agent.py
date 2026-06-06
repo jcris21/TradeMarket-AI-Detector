@@ -1,0 +1,508 @@
+"""Tests for ScoringAgent — filter, score, and rank assets."""
+
+import pytest
+import aiosqlite
+
+from app.analysis.models import AssetAnalysis
+from app.analysis.scoring_agent import (
+    _compute_bet_size,
+    _compute_score,
+    _get_hit_rate,
+    _get_prior_scores,
+    score_and_rank,
+    score_and_rank_with_errors,
+    validate_asset_analysis,
+)
+
+
+def _make_analysis(
+    ticker: str,
+    signal: str = "BUY",
+    confidence: float = 0.8,
+    rr_ratio: float = 4.0,
+    support_validated: bool = True,
+    macd: str = "bullish_crossover",
+    rsi: float = 55.0,
+    volume: str = "above_avg",
+    entry_price: float = 100.0,
+    target_price: float = 130.0,
+    stop_loss: float = 90.0,
+) -> AssetAnalysis:
+    return AssetAnalysis(
+        ticker=ticker,
+        signal=signal,
+        confidence=confidence,
+        entry_price=entry_price,
+        target_price=target_price,
+        stop_loss=stop_loss,
+        risk_reward_ratio=rr_ratio,
+        support_validated=support_validated,
+        indicators_summary={"macd": macd, "rsi": rsi, "volume": volume},
+        argument="Test argument.",
+    )
+
+
+@pytest.mark.parametrize(
+    "asset,expected_valid,expected_reason",
+    [
+        (_make_analysis("VALID"), True, ""),
+        (_make_analysis("ENTRY", entry_price=0.0), False, "entry_price <= 0"),
+        (
+            _make_analysis("STOP", entry_price=100.0, stop_loss=100.0),
+            False,
+            "stop_loss >= entry_price (inverted stop)",
+        ),
+        (
+            _make_analysis("TARGET", entry_price=100.0, target_price=100.0),
+            False,
+            "target_price <= entry_price (inverted target)",
+        ),
+        (_make_analysis("RR", rr_ratio=-1.0), False, "negative risk_reward_ratio"),
+    ],
+)
+def test_validate_asset_analysis_guardrails(asset, expected_valid, expected_reason):
+    valid, reason = validate_asset_analysis(asset)
+    assert valid is expected_valid
+    assert reason == expected_reason
+
+
+@pytest.mark.parametrize(
+    "asset,reason_fragment",
+    [
+        (_make_analysis("ENTRY", entry_price=0.0), "entry_price <= 0"),
+        (_make_analysis("STOP", entry_price=100.0, stop_loss=101.0), "inverted stop"),
+        (_make_analysis("TARGET", entry_price=100.0, target_price=99.0), "inverted target"),
+        (_make_analysis("RR", rr_ratio=-0.1), "negative risk_reward_ratio"),
+    ],
+)
+def test_structurally_invalid_assets_are_not_scored_or_ranked(asset, reason_fragment):
+    ranked, errors = score_and_rank_with_errors([asset], min_rr=3.0, top_n=5)
+
+    assert len(ranked) == 1
+    result = ranked[0]
+    assert result.rank is None
+    assert result.score is None
+    assert result.score_delta is None
+    assert result.expected_gain_per10 is None
+    assert result.expected_loss_per10 is None
+    assert result.expected_value_per10 is None
+    assert errors == [
+        {
+            "ticker": asset.ticker,
+            "error_message": f"structural_invalid: {validate_asset_analysis(asset)[1]}",
+        }
+    ]
+    assert reason_fragment in errors[0]["error_message"]
+
+
+def test_valid_asset_guardrail_regression_preserves_scoring_bet_size_and_delta():
+    asset = _make_analysis("AAPL")
+
+    ranked, errors = score_and_rank_with_errors(
+        [asset],
+        hit_rate=0.35,
+        hit_rate_source="assumed",
+        prior_scores={"AAPL": 60.0},
+        min_rr=3.0,
+        top_n=5,
+    )
+
+    assert errors == []
+    assert len(ranked) == 1
+    result = ranked[0]
+    assert result.rank == 1
+    assert result.score is not None
+    assert result.score_delta == round(result.score - 60.0, 2)
+    assert result.expected_gain_per10 == 3.0
+    assert result.expected_loss_per10 == 1.0
+    assert result.expected_value_per10 is not None
+    assert result.hit_rate_used == 0.35
+    assert result.hit_rate_source == "assumed"
+
+
+def test_structural_errors_are_reported_per_ticker():
+    assets = [
+        _make_analysis("BAD_STOP", stop_loss=100.0),
+        _make_analysis("BAD_TARGET", target_price=100.0),
+        _make_analysis("VALID"),
+    ]
+
+    ranked, errors = score_and_rank_with_errors(assets, min_rr=3.0, top_n=5)
+
+    assert {error["ticker"] for error in errors} == {"BAD_STOP", "BAD_TARGET"}
+    assert all(error["error_message"].startswith("structural_invalid:") for error in errors)
+    assert next(asset for asset in ranked if asset.ticker == "VALID").rank == 1
+
+
+def test_filters_below_min_rr():
+    assets = [
+        _make_analysis("AAPL", rr_ratio=2.9),  # below 3.0
+        _make_analysis("MSFT", rr_ratio=3.0),  # exactly at limit — passes
+    ]
+    ranked = score_and_rank(assets, min_rr=3.0, top_n=5)
+    qualifiers = [a for a in ranked if a.rank is not None]
+    assert len(qualifiers) == 1
+    assert qualifiers[0].ticker == "MSFT"
+
+
+def test_filters_avoid_signal():
+    assets = [
+        _make_analysis("AAPL", signal="AVOID"),
+        _make_analysis("MSFT", signal="BUY"),
+    ]
+    ranked = score_and_rank(assets, min_rr=3.0, top_n=5)
+    qualifiers = [a for a in ranked if a.rank is not None]
+    assert len(qualifiers) == 1
+    assert qualifiers[0].ticker == "MSFT"
+
+
+def test_ranked_by_score_descending():
+    assets = [
+        _make_analysis("LOW", confidence=0.5, rr_ratio=3.0),
+        _make_analysis("HIGH", confidence=0.9, rr_ratio=5.0),
+        _make_analysis("MID", confidence=0.7, rr_ratio=4.0),
+    ]
+    ranked = score_and_rank(assets, min_rr=3.0, top_n=5)
+    qualifiers = [a for a in ranked if a.rank is not None]
+    assert qualifiers[0].ticker == "HIGH"
+    assert qualifiers[-1].ticker == "LOW"
+
+
+def test_top_n_limits_ranked_count():
+    assets = [_make_analysis(f"T{i}", rr_ratio=3.0 + i) for i in range(8)]
+    ranked = score_and_rank(assets, min_rr=3.0, top_n=5)
+    qualifiers = [a for a in ranked if a.rank is not None]
+    assert len(qualifiers) == 5
+
+
+def test_zero_qualifying_assets_returns_all_unranked():
+    assets = [_make_analysis("AAPL", signal="AVOID"), _make_analysis("MSFT", rr_ratio=1.0)]
+    ranked = score_and_rank(assets, min_rr=3.0, top_n=5)
+    assert all(a.rank is None for a in ranked)
+
+
+def test_wait_signal_qualifies():
+    assets = [_make_analysis("AAPL", signal="WAIT", rr_ratio=3.5)]
+    ranked = score_and_rank(assets, min_rr=3.0, top_n=5)
+    qualifiers = [a for a in ranked if a.rank is not None]
+    assert len(qualifiers) == 1
+
+
+def test_score_uses_indicator_confluence():
+    # All bullish → higher score than partial
+    all_bullish = _make_analysis(
+        "FULL", confidence=0.8, rr_ratio=4.0,
+        macd="bullish_crossover", rsi=55.0, volume="above_avg"
+    )
+    partial = _make_analysis(
+        "PART", confidence=0.8, rr_ratio=4.0,
+        macd="neutral", rsi=75.0, volume="below_avg"
+    )
+    ranked = score_and_rank([all_bullish, partial], min_rr=3.0, top_n=5)
+    full_score = next(a.score for a in ranked if a.ticker == "FULL")
+    part_score = next(a.score for a in ranked if a.ticker == "PART")
+    assert full_score > part_score
+
+
+# ── Bet-size tests (Nex 9) ────────────────────────────────────────────────────
+
+def _make_asset(entry: float, target: float, stop: float) -> AssetAnalysis:
+    return AssetAnalysis(
+        ticker="TEST",
+        signal="BUY",
+        confidence=0.8,
+        entry_price=entry,
+        target_price=target,
+        stop_loss=stop,
+        risk_reward_ratio=3.0,
+        support_validated=True,
+        indicators_summary={},
+        argument="test",
+    )
+
+
+@pytest.mark.parametrize(
+    "entry,target,stop,expected_gain,expected_loss",
+    [
+        (100.0, 130.0, 90.0, 3.0, 1.0),   # test_bet_size_rr_3
+        (100.0, 120.0, 90.0, 2.0, 1.0),   # test_bet_size_rr_2
+        (100.0, 160.0, 90.0, 6.0, 1.0),   # test_bet_size_rr_6
+    ],
+    ids=["rr_3", "rr_2", "rr_6"],
+)
+def test_bet_size_gain_loss(entry, target, stop, expected_gain, expected_loss):
+    result = _compute_bet_size(_make_asset(entry, target, stop), 0.35, "assumed")
+    assert result.expected_gain_per10 == expected_gain
+    assert result.expected_loss_per10 == expected_loss
+
+
+def test_bet_size_division_by_zero():
+    result = _compute_bet_size(_make_asset(0.0, 130.0, 90.0), 0.35, "assumed")
+    assert result.expected_gain_per10 == 0.0
+    assert result.expected_loss_per10 == 0.0
+    assert result.expected_value_per10 == 0.0
+
+
+async def _db_with_outcomes(n_total: int, n_hits: int) -> aiosqlite.Connection:
+    db = await aiosqlite.connect(":memory:")
+    db.row_factory = aiosqlite.Row
+    await db.execute(
+        "CREATE TABLE analysis_results "
+        "(id TEXT PRIMARY KEY, user_id TEXT, outcome TEXT)"
+    )
+    for i in range(n_total):
+        outcome = "TARGET_HIT" if i < n_hits else "STOP_HIT"
+        await db.execute(
+            "INSERT INTO analysis_results VALUES (?, 'default', ?)", (str(i), outcome)
+        )
+    await db.commit()
+    return db
+
+
+@pytest.mark.asyncio
+async def test_ev_switch_assumed():
+    db = await _db_with_outcomes(5, 2)
+    try:
+        rate, source = await _get_hit_rate(db)
+    finally:
+        await db.close()
+    assert rate == 0.35
+    assert source == "assumed"
+
+
+@pytest.mark.asyncio
+async def test_ev_switch_realized():
+    db = await _db_with_outcomes(30, 12)
+    try:
+        rate, source = await _get_hit_rate(db)
+    finally:
+        await db.close()
+    assert rate == pytest.approx(12 / 30)
+    assert source == "observed"
+
+
+@pytest.mark.asyncio
+async def test_get_hit_rate_fallback():
+    db = await aiosqlite.connect(":memory:")
+    db.row_factory = aiosqlite.Row
+    try:
+        rate, source = await _get_hit_rate(db)
+    finally:
+        await db.close()
+    assert rate == 0.35
+    assert source == "assumed"
+
+
+# ── Score-delta tests (NEX-18) ────────────────────────────────────────────────
+
+async def _db_with_two_runs(prior_ticker_scores: dict[str, float]) -> aiosqlite.Connection:
+    """In-memory DB with a prior run and a more recent current run."""
+    db = await aiosqlite.connect(":memory:")
+    db.row_factory = aiosqlite.Row
+    await db.execute(
+        "CREATE TABLE analysis_results "
+        "(id TEXT, run_id TEXT, ticker TEXT, score REAL, analyzed_at TEXT)"
+    )
+    for ticker, score in prior_ticker_scores.items():
+        await db.execute(
+            "INSERT INTO analysis_results VALUES (?, 'run-prior', ?, ?, '2026-01-01T00:00:00')",
+            (ticker, ticker, score),
+        )
+    # More recent "current" run so OFFSET 1 picks the prior run
+    await db.execute(
+        "INSERT INTO analysis_results VALUES ('x', 'run-current', 'DUMMY', 50.0, '2026-01-02T00:00:00')"
+    )
+    await db.commit()
+    return db
+
+
+@pytest.mark.asyncio
+async def test_score_delta_between_runs():
+    db = await _db_with_two_runs({"AAPL": 60.0})
+    try:
+        prior = await _get_prior_scores(db)
+    finally:
+        await db.close()
+    assert prior == {"AAPL": 60.0}
+
+    asset = _make_analysis("AAPL")
+    ranked = score_and_rank([asset], min_rr=3.0, top_n=5, prior_scores=prior)
+    aapl = next(a for a in ranked if a.ticker == "AAPL")
+    assert aapl.score_delta == round((aapl.score or 0) - 60.0, 2)
+
+
+@pytest.mark.asyncio
+async def test_score_delta_first_run():
+    db = await aiosqlite.connect(":memory:")
+    db.row_factory = aiosqlite.Row
+    await db.execute(
+        "CREATE TABLE analysis_results "
+        "(id TEXT, run_id TEXT, ticker TEXT, score REAL, analyzed_at TEXT)"
+    )
+    await db.commit()
+    try:
+        prior = await _get_prior_scores(db)
+    finally:
+        await db.close()
+    assert prior == {}
+
+    asset = _make_analysis("AAPL")
+    ranked = score_and_rank([asset], min_rr=3.0, top_n=5, prior_scores=prior)
+    aapl = next(a for a in ranked if a.ticker == "AAPL")
+    assert aapl.score_delta == 0.0
+
+
+@pytest.mark.asyncio
+async def test_score_delta_db_error():
+    db = await aiosqlite.connect(":memory:")
+    try:
+        prior = await _get_prior_scores(db)
+    finally:
+        await db.close()
+    assert prior == {}
+
+    asset = _make_analysis("AAPL")
+    ranked = score_and_rank([asset], min_rr=3.0, top_n=5, prior_scores=prior)
+    aapl = next(a for a in ranked if a.ticker == "AAPL")
+    assert aapl.score_delta == 0.0
+
+
+# ── ATR viability tests (story-005) ──────────────────────────────────────────
+
+def _make_atr_analysis(
+    ticker: str,
+    stop_distance_pct: float,
+    atr_14_pct: float | None,
+    rr_ratio: float = 4.0,
+    confidence: float = 0.8,
+) -> AssetAnalysis:
+    """Build an AssetAnalysis with given stop_distance_pct and atr_14_pct."""
+    entry = 100.0
+    stop = round(entry * (1.0 - stop_distance_pct), 4)
+    # Set target so RR = rr_ratio
+    target = round(entry + rr_ratio * (entry - stop), 4)
+    return AssetAnalysis(
+        ticker=ticker,
+        signal="BUY",
+        confidence=confidence,
+        entry_price=entry,
+        target_price=target,
+        stop_loss=stop,
+        risk_reward_ratio=rr_ratio,
+        support_validated=True,
+        indicators_summary={"macd": "bullish_crossover", "rsi": 55.0, "volume": "above_avg"},
+        argument="ATR test.",
+        atr_14_pct=atr_14_pct,
+    )
+
+
+def test_atr_hard_disqualify():
+    """stop_distance_pct < 0.5 * atr_14_pct → rank=None, error contains atr_disqualify:"""
+    # stop_dist=0.03, atr=0.08 → 0.03 < 0.04 (hard floor)
+    asset = _make_atr_analysis("HARD", stop_distance_pct=0.03, atr_14_pct=0.08)
+    ranked, errors = score_and_rank_with_errors([asset], min_rr=3.0, top_n=5)
+
+    assert len(ranked) == 1
+    result = ranked[0]
+    assert result.rank is None
+    assert result.stop_viable is False
+    assert any("atr_disqualify:" in e["error_message"] for e in errors)
+    assert errors[0]["ticker"] == "HARD"
+
+
+def test_atr_soft_penalty():
+    """stop_distance_pct in soft-penalty band → stop_viable=False, score 15 pts below baseline"""
+    # stop_dist=0.05, atr=0.08 → 0.05 in [0.04, 0.064) → soft penalty -15 pts
+    asset = _make_atr_analysis("SOFT", stop_distance_pct=0.05, atr_14_pct=0.08, rr_ratio=4.0)
+    baseline_asset = _make_atr_analysis("BASE", stop_distance_pct=0.05, atr_14_pct=None, rr_ratio=4.0)
+
+    ranked_soft, _ = score_and_rank_with_errors([asset], min_rr=3.0, top_n=5)
+    ranked_base, _ = score_and_rank_with_errors([baseline_asset], min_rr=3.0, top_n=5)
+
+    soft_score = next(a.score for a in ranked_soft if a.ticker == "SOFT")
+    base_score = next(a.score for a in ranked_base if a.ticker == "BASE")
+
+    assert soft_score is not None
+    assert base_score is not None
+    assert abs((base_score - soft_score) - 15.0) < 0.01
+    soft_result = next(a for a in ranked_soft if a.ticker == "SOFT")
+    assert soft_result.stop_viable is False
+
+
+def test_atr_neutral_band():
+    """stop_distance_pct in neutral band → stop_viable=True, score unchanged"""
+    # stop_dist=0.08, atr=0.08 → 0.08 in [0.064, 0.12] → neutral
+    asset = _make_atr_analysis("NEUTRAL", stop_distance_pct=0.08, atr_14_pct=0.08, rr_ratio=4.0)
+    baseline_asset = _make_atr_analysis("BASE", stop_distance_pct=0.08, atr_14_pct=None, rr_ratio=4.0)
+
+    ranked_neutral, _ = score_and_rank_with_errors([asset], min_rr=3.0, top_n=5)
+    ranked_base, _ = score_and_rank_with_errors([baseline_asset], min_rr=3.0, top_n=5)
+
+    neutral_score = next(a.score for a in ranked_neutral if a.ticker == "NEUTRAL")
+    base_score = next(a.score for a in ranked_base if a.ticker == "BASE")
+
+    assert neutral_score == base_score
+    neutral_result = next(a for a in ranked_neutral if a.ticker == "NEUTRAL")
+    assert neutral_result.stop_viable is True
+
+
+def test_atr_boost():
+    """stop_distance_pct > 1.5 * atr_14_pct → stop_viable=True, score 8 pts above baseline"""
+    # stop_dist=0.15, atr=0.08 → 0.15 > 0.12 → boost +8 pts
+    asset = _make_atr_analysis("BOOST", stop_distance_pct=0.15, atr_14_pct=0.08, rr_ratio=4.0)
+    baseline_asset = _make_atr_analysis("BASE", stop_distance_pct=0.15, atr_14_pct=None, rr_ratio=4.0)
+
+    ranked_boost, _ = score_and_rank_with_errors([asset], min_rr=3.0, top_n=5)
+    ranked_base, _ = score_and_rank_with_errors([baseline_asset], min_rr=3.0, top_n=5)
+
+    boost_score = next(a.score for a in ranked_boost if a.ticker == "BOOST")
+    base_score = next(a.score for a in ranked_base if a.ticker == "BASE")
+
+    assert boost_score is not None
+    assert base_score is not None
+    assert abs((boost_score - base_score) - 8.0) < 0.01
+    boost_result = next(a for a in ranked_boost if a.ticker == "BOOST")
+    assert boost_result.stop_viable is True
+
+
+def test_atr_none_fallback():
+    """Asset with atr_14_pct=None passes scoring unchanged with stop_viable=None."""
+    asset = _make_atr_analysis("NOATR", stop_distance_pct=0.10, atr_14_pct=None, rr_ratio=4.0)
+
+    ranked, errors = score_and_rank_with_errors([asset], min_rr=3.0, top_n=5)
+    result = next(a for a in ranked if a.ticker == "NOATR")
+
+    # No ATR errors
+    atr_errors = [e for e in errors if "atr_disqualify" in e.get("error_message", "")]
+    assert atr_errors == []
+
+    # stop_viable should be None (ATR data unavailable)
+    assert result.stop_viable is None
+
+    # Score should match baseline (no ATR adjustment)
+    baseline_score = _compute_score(asset)
+    assert result.score == baseline_score
+
+
+def test_atr_regression_rank_order_preserved():
+    """Signals with ATR-neutral stop distances maintain rank order from pre-feature baseline."""
+    # These signals all have stop_distance_pct in the neutral band (no ATR adjustment).
+    # Rank order should follow score formula as before.
+    assets = [
+        _make_atr_analysis("HIGH", stop_distance_pct=0.10, atr_14_pct=0.08,
+                            confidence=0.9, rr_ratio=5.0),
+        _make_atr_analysis("MID", stop_distance_pct=0.10, atr_14_pct=0.08,
+                            confidence=0.7, rr_ratio=4.0),
+        _make_atr_analysis("LOW", stop_distance_pct=0.10, atr_14_pct=0.08,
+                            confidence=0.5, rr_ratio=3.0),
+    ]
+
+    ranked, errors = score_and_rank_with_errors(assets, min_rr=3.0, top_n=5)
+    atr_errors = [e for e in errors if "atr_disqualify" in e.get("error_message", "")]
+    assert atr_errors == []
+
+    qualifiers = [a for a in ranked if a.rank is not None]
+    assert len(qualifiers) == 3
+    assert qualifiers[0].ticker == "HIGH"
+    assert qualifiers[1].ticker == "MID"
+    assert qualifiers[2].ticker == "LOW"

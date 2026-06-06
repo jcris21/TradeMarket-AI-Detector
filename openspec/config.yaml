@@ -1,0 +1,37 @@
+schema: spec-driven
+
+context: |
+  Project: FinAlly — AI Trading Workstation
+  Stack: FastAPI (Python 3.12 / uv) + Next.js (TypeScript static export)
+         + SQLite (aiosqlite) + LiteLLM → OpenRouter → Cerebras
+  Container: Single Docker container on port 8000
+  Package manager: uv (backend), npm (frontend)
+  All code, comments and commits in English.
+
+  Read and apply before any artifact:
+  - docs/base-standards.md — core principles, architecture, TDD rules
+  - docs/backend-standards.md — FastAPI, uv, aiosqlite, LiteLLM patterns
+  - docs/frontend-standards.md — Next.js static, Tailwind, SSE, Bloomberg UI
+  - docs/api-spec.yml — all endpoint contracts (update after API changes)
+  - docs/data-model.md — SQLite schema and domain entities
+
+  Agent roles:
+  - Backend work → adopt ai-specs/agents/backend-developer.md
+  - Frontend work → adopt ai-specs/agents/frontend-developer.md
+
+rules:
+  _global:
+    - Always read docs/base-standards.md before any task
+    - Create openspec/changes/ proposal before writing code
+    - Use uv (not pip) for all Python package operations
+    - All LLM calls go through app/llm.py only
+  backend:
+    - Read docs/backend-standards.md
+    - Adopt ai-specs/agents/backend-developer.md
+    - Run ruff before marking task done
+    - LLM_MOCK=true in all test environments
+  frontend:
+    - Read docs/frontend-standards.md
+    - Adopt ai-specs/agents/frontend-developer.md
+    - Maintain Bloomberg terminal aesthetic
+    - Relative paths only for API calls

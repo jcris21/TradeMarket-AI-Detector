@@ -60,3 +60,6 @@ finally/
 ## License
 
 See [LICENSE](LICENSE).
+
+---
+*Last updated: 2026-04-07*
