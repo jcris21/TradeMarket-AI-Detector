@@ -60,6 +60,15 @@ function ProgressLabel({ status }: { status: string }) {
   ) : null;
 }
 
+function AtrBadge({ stopViable, atr14Pct }: { stopViable?: boolean | null; atr14Pct?: number | null }) {
+  if (atr14Pct == null) return <span className="text-text-muted font-mono">—</span>;
+  if (stopViable === true)
+    return <span className="text-gain font-mono text-xs" title={`ATR 14: ${(atr14Pct * 100).toFixed(2)}%`}>✔ ATR</span>;
+  if (stopViable === false)
+    return <span className="text-loss font-mono text-xs" title={`ATR 14: ${(atr14Pct * 100).toFixed(2)}%`}>✘ ATR</span>;
+  return <span className="text-text-muted font-mono">—</span>;
+}
+
 function SignalTable({
   signals,
   onRowClick,
@@ -86,6 +95,7 @@ function SignalTable({
           <th className="px-3 py-0 text-label-caps">Target</th>
           <th className="px-3 py-0 text-label-caps">Stop</th>
           <th className="px-3 py-0 text-label-caps">Señal</th>
+          <th className="px-3 py-0 text-label-caps">ATR</th>
           <th className="px-3 py-0 text-label-caps">Freshness</th>
           <th className="px-3 py-0 text-label-caps">Bet Size</th>
         </tr>
@@ -116,6 +126,9 @@ function SignalTable({
                   <SignalBadge signal={asset.signal} />
                   {isOrphaned(asset) && <OrphanedBadge />}
                 </div>
+              </td>
+              <td className="px-3 py-0">
+                <AtrBadge stopViable={asset.stop_viable} atr14Pct={asset.atr_14_pct} />
               </td>
               <td className="px-3 py-0">
                 {asset.freshness_status != null && asset.freshness_age_hours != null ? (

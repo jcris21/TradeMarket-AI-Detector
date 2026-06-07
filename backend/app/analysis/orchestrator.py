@@ -68,6 +68,15 @@ async def run_analysis(tickers: list[str]) -> AnalysisResult:
     vision_tasks = [_vision_one(t) for t in successful]
     analyses: list[AssetAnalysis] = await asyncio.gather(*vision_tasks)
 
+    # Enrich analyses with ATR data from Stage-1 indicators
+    analyses = [
+        a.model_copy(update={
+            "atr_14_pct": successful[a.ticker].atr_14_pct,
+        })
+        if a.ticker in successful else a
+        for a in analyses
+    ]
+
     # Stage 4: Score and rank (with bet-size pre-computation)
     logger.info("Stage 4: scoring and ranking %d analyses", len(analyses))
     db = await get_connection()

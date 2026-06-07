@@ -49,6 +49,8 @@ _MOCK_ANALYSIS_SEED = [
         "hit_rate_used": 0.35,
         "hit_rate_source": "assumed",
         "analyzed_at_days_ago": 0,
+        "atr_14_pct": 0.0142,
+        "stop_viable": 1,
     },
     {
         "ticker": "AMZN",
@@ -82,6 +84,8 @@ _MOCK_ANALYSIS_SEED = [
         "hit_rate_used": 0.35,
         "hit_rate_source": "assumed",
         "analyzed_at_days_ago": 0,
+        "atr_14_pct": 0.0098,
+        "stop_viable": 0,
     },
     # AAPL: same run, but analyzed 38 days ago with no outcome → ⚠ Orphaned badge
     {
@@ -115,6 +119,8 @@ _MOCK_ANALYSIS_SEED = [
         "hit_rate_used": 0.35,
         "hit_rate_source": "assumed",
         "analyzed_at_days_ago": 38,  # triggers Orphaned badge (> 35 days, outcome=NULL)
+        "atr_14_pct": None,
+        "stop_viable": None,
     },
 ]
 
@@ -246,6 +252,11 @@ _OUTCOME_COLUMNS = [
     ("hold_days", "REAL"),
 ]
 
+_ATR_COLUMNS = [
+    ("stop_viable", "INTEGER"),
+    ("atr_14_pct", "REAL"),
+]
+
 
 async def init_db() -> None:
     """Create tables and seed default data if needed."""
@@ -255,7 +266,7 @@ async def init_db() -> None:
         await db.executescript(SCHEMA_SQL)
 
         # Lazy migration: add columns if not already present
-        for col, col_type in _BET_SIZE_COLUMNS + _OUTCOME_COLUMNS:
+        for col, col_type in _BET_SIZE_COLUMNS + _OUTCOME_COLUMNS + _ATR_COLUMNS:
             try:
                 await db.execute(
                     f"ALTER TABLE analysis_results ADD COLUMN {col} {col_type}"
@@ -314,8 +325,9 @@ async def init_db() -> None:
                         support_validated, argument, indicators_summary,
                         screenshot_path, analyzed_at,
                         expected_gain_per10, expected_loss_per10, expected_value_per10,
-                        hit_rate_used, hit_rate_source
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)
+                        hit_rate_used, hit_rate_source,
+                        stop_viable, atr_14_pct
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         str(uuid.uuid4()),
@@ -339,6 +351,8 @@ async def init_db() -> None:
                         row["expected_value_per10"],
                         row["hit_rate_used"],
                         row["hit_rate_source"],
+                        row.get("stop_viable"),
+                        row.get("atr_14_pct"),
                     ),
                 )
 

@@ -21,6 +21,8 @@ class TechnicalIndicators:
     support_2: float     # 40-period low
     resistance_1: float  # 20-period high
     resistance_2: float  # 40-period high
+    atr_14: float | None = None       # 14-period ATR absolute
+    atr_14_pct: float | None = None   # atr_14 / current_price
 
 
 class AssetAnalysis(BaseModel):
@@ -44,9 +46,12 @@ class AssetAnalysis(BaseModel):
     expected_value_per10: float | None = None
     hit_rate_used: float | None = None
     hit_rate_source: str | None = None
+    atr_14_pct: float | None = None
+    stop_viable: bool | None = None
 
     def to_db_row(self, run_id: str) -> dict:
         """Convert to a dict suitable for save_analysis_results()."""
+        stop_viable_int = None if self.stop_viable is None else (1 if self.stop_viable else 0)
         return {
             "run_id": run_id,
             "ticker": self.ticker,
@@ -68,6 +73,8 @@ class AssetAnalysis(BaseModel):
             "expected_value_per10": self.expected_value_per10,
             "hit_rate_used": self.hit_rate_used,
             "hit_rate_source": self.hit_rate_source,
+            "atr_14_pct": self.atr_14_pct,
+            "stop_viable": stop_viable_int,
         }
 
 

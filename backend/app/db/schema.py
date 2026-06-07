@@ -79,7 +79,9 @@ CREATE TABLE IF NOT EXISTS analysis_results (
     actual_gain_pct REAL,
     actual_loss_pct REAL,
     hold_days REAL,
-    support_break_level TEXT
+    support_break_level TEXT,
+    stop_viable INTEGER,
+    atr_14_pct REAL
 );
 
 CREATE TABLE IF NOT EXISTS analysis_tickers (

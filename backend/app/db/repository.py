@@ -385,8 +385,8 @@ async def save_analysis_results(
                     "risk_reward_ratio, entry_price, target_price, stop_loss, "
                     "support_validated, argument, indicators_summary, screenshot_path, analyzed_at, "
                     "expected_gain_per10, expected_loss_per10, expected_value_per10, "
-                    "hit_rate_used, hit_rate_source) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "hit_rate_used, hit_rate_source, stop_viable, atr_14_pct) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         _uuid(),
                         user_id,
@@ -411,6 +411,8 @@ async def save_analysis_results(
                         row.get("expected_value_per10"),
                         row.get("hit_rate_used"),
                         row.get("hit_rate_source"),
+                        row.get("stop_viable"),
+                        row.get("atr_14_pct"),
                     ),
                 )
                 await db.commit()
@@ -559,6 +561,11 @@ def _parse_analysis_row(row) -> dict:
             d["indicators_summary"] = {}
     if d.get("analyzed_at"):
         d.update(compute_freshness(d["analyzed_at"]))
+    sv = d.get("stop_viable")
+    if sv is None:
+        d["stop_viable"] = None
+    else:
+        d["stop_viable"] = bool(sv)
     return d
 
 

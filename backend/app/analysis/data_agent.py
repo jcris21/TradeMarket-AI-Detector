@@ -148,6 +148,20 @@ def _compute_indicators(ticker: str, df: pd.DataFrame) -> TechnicalIndicators:
     if len(nearest_res) < 2:
         nearest_res.append(float(high.iloc[-40:].max() if len(high) >= 40 else high.max()))
 
+    # ATR (14)
+    atr_14: float | None = None
+    atr_14_pct: float | None = None
+    try:
+        atr_series = ta.atr(high, low, close, length=14)
+        if atr_series is not None and not atr_series.empty:
+            raw_atr = atr_series.iloc[-1]
+            import pandas as _pd
+            if not _pd.isna(raw_atr) and current_price > 0:
+                atr_14 = round(float(raw_atr), 4)
+                atr_14_pct = round(atr_14 / current_price, 6)
+    except Exception:
+        pass
+
     return TechnicalIndicators(
         ticker=ticker,
         current_price=current_price,
@@ -159,6 +173,8 @@ def _compute_indicators(ticker: str, df: pd.DataFrame) -> TechnicalIndicators:
         support_2=round(nearest_sup[1], 2),
         resistance_1=round(nearest_res[0], 2),
         resistance_2=round(nearest_res[1], 2),
+        atr_14=atr_14,
+        atr_14_pct=atr_14_pct,
     )
 
 
