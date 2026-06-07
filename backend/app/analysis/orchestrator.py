@@ -27,7 +27,7 @@ async def run_analysis(tickers: list[str]) -> AnalysisResult:
     errors: list[dict] = []
 
     # Stage 1: Batch indicator fetch (single yfinance call avoids thread-safety race)
-    logger.info("Stage 1: batch-fetching indicators for %d tickers", len(tickers))
+    t1 = time.monotonic()
     batch_results = await fetch_indicators_batch(tickers)
 
     successful: dict[str, TechnicalIndicators] = {}
@@ -37,28 +37,49 @@ async def run_analysis(tickers: list[str]) -> AnalysisResult:
         else:
             successful[ticker] = result
 
+    logger.info("stage_complete", extra={
+        "stage": 1, "run_id": run_id,
+        "duration_ms": int((time.monotonic() - t1) * 1000),
+        "tickers_total": len(tickers),
+        "tickers_ok": len(successful),
+        "tickers_error": len(tickers) - len(successful),
+    })
+
     if not successful:
+        duration = round(time.monotonic() - start, 2)
+        logger.info("run_complete", extra={
+            "run_id": run_id,
+            "total_ms": int(duration * 1000),
+            "signals_generated": 0,
+            "error_count": len(tickers),
+        })
         return AnalysisResult(
             run_id=run_id,
             analyzed_at=datetime.now(timezone.utc).isoformat(),
             assets=[],
             top_5=[],
             errors=errors,
-            duration_seconds=round(time.monotonic() - start, 2),
+            duration_seconds=duration,
         )
 
     # Stage 2: Load pre-captured screenshots from the screenshots folder
-    logger.info("Stage 2: loading pre-captured screenshots for %d tickers", len(successful))
+    t2 = time.monotonic()
     screenshots_dir = Path(__file__).parents[3] / "screenshots"
     screenshots: dict[str, bytes | None] = {}
     for ticker in successful:
         png = screenshots_dir / f"{ticker}.png"
         screenshots[ticker] = png.read_bytes() if png.exists() else None
     loaded = sum(1 for v in screenshots.values() if v is not None)
-    logger.info("Loaded %d/%d screenshots from %s", loaded, len(successful), screenshots_dir)
+    logger.info("stage_complete", extra={
+        "stage": 2, "run_id": run_id,
+        "duration_ms": int((time.monotonic() - t2) * 1000),
+        "tickers_total": len(successful),
+        "tickers_ok": loaded,
+        "tickers_error": len(successful) - loaded,
+    })
 
     # Stage 3: Parallel vision analysis
-    logger.info("Stage 3: running vision analysis for %d tickers", len(successful))
+    t3 = time.monotonic()
 
     async def _vision_one(ticker: str) -> AssetAnalysis:
         indicators = successful[ticker]
@@ -68,6 +89,13 @@ async def run_analysis(tickers: list[str]) -> AnalysisResult:
     ticker_list = list(successful.keys())
     vision_tasks = [_vision_one(t) for t in ticker_list]
     raw_analyses: list[AssetAnalysis] = await asyncio.gather(*vision_tasks)
+    logger.info("stage_complete", extra={
+        "stage": 3, "run_id": run_id,
+        "duration_ms": int((time.monotonic() - t3) * 1000),
+        "tickers_total": len(successful),
+        "tickers_ok": len(raw_analyses),
+        "tickers_error": 0,
+    })
 
     # Inject ATR values from Stage-1 indicators into each AssetAnalysis
     analyses: list[AssetAnalysis] = [
@@ -79,7 +107,7 @@ async def run_analysis(tickers: list[str]) -> AnalysisResult:
     ]
 
     # Stage 4: Score and rank (with bet-size pre-computation)
-    logger.info("Stage 4: scoring and ranking %d analyses", len(analyses))
+    t4 = time.monotonic()
     db = await get_connection()
     try:
         hit_rate, hit_rate_source = await _get_hit_rate(db)
@@ -100,8 +128,21 @@ async def run_analysis(tickers: list[str]) -> AnalysisResult:
     write_errors = await save_analysis_results(db_rows)
     errors.extend(write_errors)
 
+    logger.info("stage_complete", extra={
+        "stage": 4, "run_id": run_id,
+        "duration_ms": int((time.monotonic() - t4) * 1000),
+        "tickers_total": len(analyses),
+        "tickers_ok": len(top_5),
+        "tickers_error": len(structural_errors),
+    })
+
     duration = round(time.monotonic() - start, 2)
-    logger.info("Analysis complete in %.1fs — %d top opportunities", duration, len(top_5))
+    logger.info("run_complete", extra={
+        "run_id": run_id,
+        "total_ms": int(duration * 1000),
+        "signals_generated": len(top_5),
+        "error_count": len(errors),
+    })
 
     return AnalysisResult(
         run_id=run_id,

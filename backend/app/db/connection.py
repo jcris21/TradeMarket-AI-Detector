@@ -16,6 +16,11 @@ from .schema import DEFAULT_CASH_BALANCE, DEFAULT_TICKERS, DEFAULT_USER_ID, SCHE
 #   score = confidence×40 + min(rr/6,1)×100×0.35 + confluence×0.25
 # Signals for the "current" run (analyzed_at = now for GOOGL/AMZN,
 # analyzed_at = 38 days ago for AAPL so it triggers the ⚠ Orphaned badge).
+#
+# ATR badge showcase (3 states):
+#   GOOGL: atr_14_pct=2.0%, stop_distance=3.53% > boost threshold (1.5×2%)=3.0% → ✔ ATR
+#   AMZN:  atr_14_pct=5.5%, stop_distance=3.89% < soft_floor (0.8×5.5%)=4.4%   → ❌ ATR
+#   AAPL:  atr_14_pct=None (no ATR data)                                         → —
 _MOCK_ANALYSIS_SEED = [
     {
         "ticker": "GOOGL",
@@ -49,6 +54,8 @@ _MOCK_ANALYSIS_SEED = [
         "hit_rate_used": 0.35,
         "hit_rate_source": "assumed",
         "analyzed_at_days_ago": 0,
+        "atr_14_pct": 0.020,  # stop 3.53% > boost threshold 3.0% → ✔ ATR
+        "stop_viable": 1,
     },
     {
         "ticker": "AMZN",
@@ -82,6 +89,8 @@ _MOCK_ANALYSIS_SEED = [
         "hit_rate_used": 0.35,
         "hit_rate_source": "assumed",
         "analyzed_at_days_ago": 0,
+        "atr_14_pct": 0.055,  # stop 3.89% < soft_floor 4.4% → ❌ ATR (penalty band)
+        "stop_viable": 0,
     },
     # AAPL: same run, but analyzed 38 days ago with no outcome → ⚠ Orphaned badge
     {
@@ -115,6 +124,8 @@ _MOCK_ANALYSIS_SEED = [
         "hit_rate_used": 0.35,
         "hit_rate_source": "assumed",
         "analyzed_at_days_ago": 38,  # triggers Orphaned badge (> 35 days, outcome=NULL)
+        "atr_14_pct": None,   # no ATR data → —
+        "stop_viable": None,
     },
 ]
 
@@ -319,8 +330,8 @@ async def init_db() -> None:
                         support_validated, argument, indicators_summary,
                         screenshot_path, analyzed_at,
                         expected_gain_per10, expected_loss_per10, expected_value_per10,
-                        hit_rate_used, hit_rate_source
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)
+                        hit_rate_used, hit_rate_source, stop_viable, atr_14_pct
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         str(uuid.uuid4()),
@@ -344,6 +355,8 @@ async def init_db() -> None:
                         row["expected_value_per10"],
                         row["hit_rate_used"],
                         row["hit_rate_source"],
+                        row.get("stop_viable"),
+                        row.get("atr_14_pct"),
                     ),
                 )
 

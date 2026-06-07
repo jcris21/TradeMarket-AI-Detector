@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.analysis.outcome_detector import OutcomeDetector
 from app.db import get_cash_balance, get_positions, get_watchlist, init_db, insert_snapshot
+from app.logging_config import configure_logging
 from app.market import PriceCache, create_market_data_source, create_stream_router
 from app.routes import analysis, chat, market, portfolio, watchlist
 
@@ -42,6 +43,7 @@ async def _snapshot_loop(cache: PriceCache):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup/shutdown lifecycle."""
+    configure_logging()
     await init_db()
 
     source = create_market_data_source(price_cache)
