@@ -6,8 +6,11 @@ import aiosqlite
 from app.analysis.models import AssetAnalysis
 from app.analysis.scoring_agent import (
     _compute_bet_size,
+    _compute_trend_score,
     _get_hit_rate,
     _get_prior_scores,
+    _indicator_confluence_score,
+    _is_uptrend,
     score_and_rank,
     score_and_rank_with_errors,
     validate_asset_analysis,
@@ -364,3 +367,80 @@ async def test_score_delta_db_error():
     ranked = score_and_rank([asset], min_rr=3.0, top_n=5, prior_scores=prior)
     aapl = next(a for a in ranked if a.ticker == "AAPL")
     assert aapl.score_delta == 0.0
+
+
+# ── Trend score tests (STORY-006) ─────────────────────────────────────────────
+
+@pytest.mark.parametrize(
+    "sma_20,sma_50,current_price,expected",
+    [
+        (105.0, 100.0, 110.0, 10),   # full alignment: price > sma_20 > sma_50
+        (105.0, 110.0, 110.0, 5),    # partial: price > sma_20, sma_20 <= sma_50
+        (105.0, 100.0, 100.0, -8),   # counter-trend: price < sma_20
+        (105.0, 100.0, 105.0, 0),    # price == sma_20: neutral (not counter-trend)
+        (None, 100.0, 110.0, 0),     # None sma_20
+        (105.0, None, 110.0, 0),     # None sma_50
+    ],
+    ids=["full_alignment", "partial", "counter_trend", "price_at_ma", "none_sma_20", "none_sma_50"],
+)
+def test_compute_trend_score(sma_20, sma_50, current_price, expected):
+    summary = {"sma_20": sma_20, "sma_50": sma_50}
+    assert _compute_trend_score(summary, current_price) == expected
+
+
+@pytest.mark.parametrize(
+    "sma_20,sma_50,expected",
+    [
+        (105.0, 100.0, True),    # 5% spread > 0.5%
+        (100.3, 100.0, False),   # 0.3% spread <= 0.5%
+        (None, 100.0, False),    # None sma_20
+        (100.0, None, False),    # None sma_50
+        (100.0, 0.0, False),     # sma_50 == 0, no ZeroDivisionError
+    ],
+    ids=["above_threshold", "below_threshold", "sma_20_none", "sma_50_none", "sma_50_zero"],
+)
+def test_is_uptrend(sma_20, sma_50, expected):
+    assert _is_uptrend(sma_20, sma_50) is expected
+
+
+def test_adaptive_rsi_uptrend_bullish_at_60():
+    # RSI=60, uptrend (sma_20=105 > sma_50=100, 5% spread) → zone 50-75 → bullish
+    summary = {"macd": "neutral", "rsi": 60.0, "volume": "below_avg",
+               "sma_20": 105.0, "sma_50": 100.0}
+    assert _indicator_confluence_score(summary) > 0
+
+
+def test_adaptive_rsi_uptrend_not_bullish_at_45():
+    # RSI=45, uptrend → zone 50-75 → 45 < 50, not bullish
+    summary = {"macd": "neutral", "rsi": 45.0, "volume": "below_avg",
+               "sma_20": 105.0, "sma_50": 100.0}
+    assert _indicator_confluence_score(summary) == 0
+
+
+def test_adaptive_rsi_ranging_bullish_at_55():
+    # RSI=55, ranging (no SMA) → zone 40-65 → bullish
+    summary = {"macd": "neutral", "rsi": 55.0, "volume": "below_avg"}
+    assert _indicator_confluence_score(summary) > 0
+
+
+def test_adaptive_rsi_ranging_bullish_at_42():
+    # RSI=42, ranging → zone 40-65 → 42 in range → bullish
+    summary = {"macd": "neutral", "rsi": 42.0, "volume": "below_avg"}
+    assert _indicator_confluence_score(summary) > 0
+
+
+def test_aligned_signal_scores_higher_than_counter_trend():
+    # Full alignment: entry(100) > sma_20(95) > sma_50(90) → +10
+    aligned = _make_analysis("ALIGNED")
+    aligned = aligned.model_copy(update={
+        "indicators_summary": {**aligned.indicators_summary, "sma_20": 95.0, "sma_50": 90.0},
+    })
+    # Counter-trend: entry(100) < sma_20(105) → -8
+    counter = _make_analysis("COUNTER")
+    counter = counter.model_copy(update={
+        "indicators_summary": {**counter.indicators_summary, "sma_20": 105.0, "sma_50": 90.0},
+    })
+    ranked = score_and_rank([aligned, counter], min_rr=3.0, top_n=5)
+    aligned_score = next(a.score for a in ranked if a.ticker == "ALIGNED")
+    counter_score = next(a.score for a in ranked if a.ticker == "COUNTER")
+    assert aligned_score - counter_score >= 18

@@ -23,6 +23,8 @@ class TechnicalIndicators:
     resistance_2: float  # 40-period high
     atr_14: float | None = None       # 14-period ATR absolute
     atr_14_pct: float | None = None   # atr_14 / current_price
+    sma_20: float | None = None       # 20-period SMA of close
+    sma_50: float | None = None       # 50-period SMA of close
 
 
 class AssetAnalysis(BaseModel):

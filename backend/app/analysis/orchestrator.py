@@ -68,10 +68,16 @@ async def run_analysis(tickers: list[str]) -> AnalysisResult:
     vision_tasks = [_vision_one(t) for t in successful]
     analyses: list[AssetAnalysis] = await asyncio.gather(*vision_tasks)
 
-    # Enrich analyses with ATR data from Stage-1 indicators
+    # Enrich analyses with ATR, SMA, and current_price from Stage-1 indicators
     analyses = [
         a.model_copy(update={
             "atr_14_pct": successful[a.ticker].atr_14_pct,
+            "indicators_summary": {
+                **a.indicators_summary,
+                "current_price": successful[a.ticker].current_price,
+                "sma_20": successful[a.ticker].sma_20,
+                "sma_50": successful[a.ticker].sma_50,
+            },
         })
         if a.ticker in successful else a
         for a in analyses

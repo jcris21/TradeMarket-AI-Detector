@@ -68,6 +68,31 @@ def _quarantine_invalid_asset(asset: AssetAnalysis) -> AssetAnalysis:
     })
 
 
+def _is_uptrend(sma_20: float | None, sma_50: float | None) -> bool:
+    """Return True when SMA-20 is more than 0.5% above SMA-50."""
+    if sma_20 is None or sma_50 is None or sma_50 == 0:
+        return False
+    return (sma_20 - sma_50) / sma_50 > 0.005
+
+
+def _compute_trend_score(summary: dict, current_price: float) -> int:
+    """Return additive trend adjustment: +10 full align, +5 partial, -8 counter, 0 no data.
+
+    Uses current_price from indicators_summary when available, else falls back to the
+    supplied current_price argument (entry_price from AssetAnalysis).
+    """
+    sma_20 = summary.get("sma_20")
+    sma_50 = summary.get("sma_50")
+    if sma_20 is None or sma_50 is None:
+        return 0
+    price = summary.get("current_price") or current_price
+    if price > sma_20 and sma_20 > sma_50:
+        return 10
+    if price > sma_20 and sma_20 <= sma_50:
+        return 5
+    return -8 if price < sma_20 else 0
+
+
 def _indicator_confluence_score(summary: dict) -> float:
     """Return 0–100 based on how many indicators are bullish."""
     bullish_count = 0
@@ -77,7 +102,9 @@ def _indicator_confluence_score(summary: dict) -> float:
         bullish_count += 1
 
     rsi = summary.get("rsi", 50.0)
-    if isinstance(rsi, (int, float)) and 40 <= rsi <= 65:
+    uptrend = _is_uptrend(summary.get("sma_20"), summary.get("sma_50"))
+    rsi_lo, rsi_hi = (50, 75) if uptrend else (40, 65)
+    if isinstance(rsi, (int, float)) and rsi_lo <= rsi <= rsi_hi:
         bullish_count += 1
 
     volume = summary.get("volume", "")
@@ -90,13 +117,19 @@ def _indicator_confluence_score(summary: dict) -> float:
 
 
 def _compute_score(asset: AssetAnalysis, atr_viability_pts: float = 0.0) -> float:
-    """Composite score 0–100 plus ATR adjustment."""
+    """Composite score (unbounded above 100 when bonuses apply).
+
+    Base formula: confidence×40 + R/R×35% + confluence×25%.
+    Additive adjustments: trend_score (−8 to +10) + atr_viability_pts (−15 to +8).
+    Effective ceiling ~118, no enforced cap.
+    """
     confidence_component = asset.confidence * 40
     rr_normalized = min(asset.risk_reward_ratio / 6.0, 1.0) * 100
     rr_component = rr_normalized * 0.35
     confluence = _indicator_confluence_score(asset.indicators_summary)
     confluence_component = confluence * 0.25
-    return round(confidence_component + rr_component + confluence_component + atr_viability_pts, 2)
+    trend_score = _compute_trend_score(asset.indicators_summary, asset.entry_price)
+    return round(confidence_component + rr_component + confluence_component + trend_score + atr_viability_pts, 2)
 
 
 def _compute_bet_size(asset: AssetAnalysis, hit_rate: float, source: str) -> AssetAnalysis:

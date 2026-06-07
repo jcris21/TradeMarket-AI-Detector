@@ -66,3 +66,25 @@ async def test_empty_dataframe_raises_data_fetch_error(mock_download):
     with pytest.raises(DataFetchError) as exc_info:
         await fetch_indicators("FAKE")
     assert exc_info.value.ticker == "FAKE"
+
+
+# ── SMA-20 / SMA-50 tests (STORY-006) ────────────────────────────────────────
+
+@patch("app.analysis.data_agent.yf.download")
+async def test_sma_fields_present_with_sufficient_data(mock_download):
+    mock_download.return_value = _make_ohlcv(60)
+    result = await fetch_indicators("AAPL")
+    assert result.sma_20 is not None
+    assert result.sma_50 is not None
+    assert isinstance(result.sma_20, float)
+    assert isinstance(result.sma_50, float)
+    assert result.sma_20 > 0
+    assert result.sma_50 > 0
+
+
+@patch("app.analysis.data_agent.yf.download")
+async def test_sma_50_none_with_insufficient_data(mock_download):
+    # 35 rows: SMA-50 needs 50 → combined dropna removes all rows → both None
+    mock_download.return_value = _make_ohlcv(35)
+    result = await fetch_indicators("AAPL")
+    assert result.sma_50 is None

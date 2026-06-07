@@ -86,3 +86,27 @@ async def test_orchestrator_surfaces_write_errors(mock_save, mock_vision, mock_d
 
     assert any(e["ticker"] == "NVDA" for e in result.errors)
     assert any("disk I/O error" in e.get("error_message", "") for e in result.errors)
+
+
+@patch.dict(os.environ, {"PLAYWRIGHT_MOCK": "true"})
+@patch("app.analysis.orchestrator.fetch_indicators_batch", new_callable=AsyncMock)
+@patch("app.analysis.orchestrator.analyze_asset", new_callable=AsyncMock)
+@patch("app.analysis.orchestrator.save_analysis_results", new_callable=AsyncMock)
+async def test_sma_values_propagate_to_indicators_summary(mock_save, mock_vision, mock_data):
+    """SMA-20/50 and current_price from TechnicalIndicators are injected into indicators_summary."""
+    mock_save.return_value = []
+    indicators_with_sma = TechnicalIndicators(
+        ticker="NVDA", current_price=890.0, macd_signal="bullish_crossover",
+        macd_histogram=0.5, rsi=58.0, volume_ratio=1.3,
+        support_1=875.0, support_2=860.0, resistance_1=920.0, resistance_2=940.0,
+        sma_20=880.0, sma_50=860.0,
+    )
+    mock_data.return_value = {"NVDA": indicators_with_sma}
+    mock_vision.return_value = _ANALYSIS
+
+    result = await run_analysis(["NVDA"])
+
+    summary = result.assets[0].indicators_summary
+    assert summary.get("sma_20") == 880.0
+    assert summary.get("sma_50") == 860.0
+    assert summary.get("current_price") == 890.0

@@ -155,12 +155,27 @@ def _compute_indicators(ticker: str, df: pd.DataFrame) -> TechnicalIndicators:
         atr_series = ta.atr(high, low, close, length=14)
         if atr_series is not None and not atr_series.empty:
             raw_atr = atr_series.iloc[-1]
-            import pandas as _pd
-            if not _pd.isna(raw_atr) and current_price > 0:
+            if not pd.isna(raw_atr) and current_price > 0:
                 atr_14 = round(float(raw_atr), 4)
                 atr_14_pct = round(atr_14 / current_price, 6)
     except Exception:
         pass
+
+    # SMA-20 and SMA-50 for trend scoring (single dropna on combined frame)
+    sma_20: float | None = None
+    sma_50: float | None = None
+    try:
+        sma_20_series = ta.sma(close, length=20)
+        sma_50_series = ta.sma(close, length=50)
+        if sma_20_series is not None and sma_50_series is not None:
+            sma_df = pd.concat(
+                [sma_20_series.rename("sma_20"), sma_50_series.rename("sma_50")], axis=1
+            ).dropna()
+            if not sma_df.empty:
+                sma_20 = round(float(sma_df["sma_20"].iloc[-1]), 2)
+                sma_50 = round(float(sma_df["sma_50"].iloc[-1]), 2)
+    except Exception as exc:
+        logger.warning("SMA computation failed for %s: %s", ticker, exc)
 
     return TechnicalIndicators(
         ticker=ticker,
@@ -175,6 +190,8 @@ def _compute_indicators(ticker: str, df: pd.DataFrame) -> TechnicalIndicators:
         resistance_2=round(nearest_res[1], 2),
         atr_14=atr_14,
         atr_14_pct=atr_14_pct,
+        sma_20=sma_20,
+        sma_50=sma_50,
     )
 
 
