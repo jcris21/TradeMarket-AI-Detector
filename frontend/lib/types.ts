@@ -143,6 +143,8 @@ export interface AnalysisLatestResponse {
 /** Performance summary from GET /api/analysis/performance */
 export interface PerformanceSummary {
   phase_gate_active: boolean;
+  phase: number;
+  phase_banner: string;
   calibration_count: number;
   total_signals: number;
   target_hits: number;

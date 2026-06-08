@@ -11,16 +11,15 @@ function statusClass(status: string | null): string {
 }
 
 export default function PerformanceSummaryPanel({ summary }: Props) {
+  const currentPhase = summary.phase ?? 0;
+
   if (summary.phase_gate_active) {
     const pct = Math.min(summary.calibration_count / 30, 1);
     return (
       <div className="px-4 py-3 border-b border-border bg-bg-panel">
         <div className="flex items-center justify-between mb-1.5">
           <span className="text-label-caps text-text-muted">
-            Phase 0 — Calibration
-          </span>
-          <span className="text-label-caps text-accent-yellow">
-            {summary.calibration_count}/30 signals
+            {summary.phase_banner}
           </span>
         </div>
         <div className="w-full h-1 bg-bg-hover rounded-full overflow-hidden">
@@ -48,7 +47,10 @@ export default function PerformanceSummaryPanel({ summary }: Props) {
       {/* Header row */}
       <div className="flex items-center justify-between mb-2">
         <span className="text-label-caps text-text-muted">
-          Phase 1 Performance ({summary.total_signals >= 30 ? "30+" : summary.total_signals} signals)
+          {(() => {
+            const phaseLabel = ["Calibration", "Pilot", "Evaluation", "Confident"][currentPhase] ?? "Unknown";
+            return `Phase ${currentPhase}: ${phaseLabel}`;
+          })()}
         </span>
         <span className="text-label-caps text-accent-blue border border-accent-blue px-2 py-0.5 rounded">
           Live Metrics Active

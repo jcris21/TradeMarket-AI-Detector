@@ -106,6 +106,8 @@ class PerformanceResponse(BaseModel):
     """Response shape for GET /api/analysis/performance."""
 
     phase_gate_active: bool
+    phase: int = 0
+    phase_banner: str = ""
     calibration_count: int
     total_signals: int
     target_hits: int
