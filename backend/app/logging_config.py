@@ -15,9 +15,11 @@ def configure_logging() -> None:
         return
 
     handler = logging.StreamHandler()
-    handler.setFormatter(JsonFormatter("%(levelname)s %(name)s %(message)s"))
+    handler.setFormatter(JsonFormatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
 
-    root = logging.getLogger()
-    root.handlers.clear()
-    root.addHandler(handler)
-    root.setLevel(logging.INFO)
+    app_logger = logging.getLogger("app")
+    if not any(isinstance(h, logging.StreamHandler) and isinstance(h.formatter, JsonFormatter)
+               for h in app_logger.handlers):
+        app_logger.addHandler(handler)
+    app_logger.setLevel(logging.INFO)
+    app_logger.propagate = False

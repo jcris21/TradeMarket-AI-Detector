@@ -88,13 +88,22 @@ async def run_analysis(tickers: list[str]) -> AnalysisResult:
 
     ticker_list = list(successful.keys())
     vision_tasks = [_vision_one(t) for t in ticker_list]
-    raw_analyses: list[AssetAnalysis] = await asyncio.gather(*vision_tasks)
+    vision_results = await asyncio.gather(*vision_tasks, return_exceptions=True)
+    raw_analyses: list[AssetAnalysis] = []
+    vision_errors = 0
+    for ticker, res in zip(ticker_list, vision_results):
+        if isinstance(res, Exception):
+            errors.append({"ticker": ticker, "error_message": str(res)})
+            vision_errors += 1
+        else:
+            raw_analyses.append(res)
+    ticker_list = [t for t, r in zip(ticker_list, vision_results) if not isinstance(r, Exception)]
     logger.info("stage_complete", extra={
         "stage": 3, "run_id": run_id,
         "duration_ms": int((time.monotonic() - t3) * 1000),
         "tickers_total": len(successful),
         "tickers_ok": len(raw_analyses),
-        "tickers_error": 0,
+        "tickers_error": vision_errors,
     })
 
     # Inject ATR values from Stage-1 indicators into each AssetAnalysis
@@ -132,7 +141,7 @@ async def run_analysis(tickers: list[str]) -> AnalysisResult:
         "stage": 4, "run_id": run_id,
         "duration_ms": int((time.monotonic() - t4) * 1000),
         "tickers_total": len(analyses),
-        "tickers_ok": len(top_5),
+        "tickers_ok": len(ranked),
         "tickers_error": len(structural_errors),
     })
 

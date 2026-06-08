@@ -138,6 +138,8 @@ async def test_stage_logs_emitted(
     stage_run_ids = {r.__dict__["run_id"] for r in stage_records}
     assert len(stage_run_ids) == 1
     assert rc["run_id"] == next(iter(stage_run_ids))
+    assert isinstance(rc["total_ms"], int)
+    assert rc["total_ms"] >= 0
     assert result.run_id is not None
 
 
