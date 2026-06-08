@@ -15,6 +15,17 @@ logger = logging.getLogger(__name__)
 FRESHNESS_THRESHOLDS = {"fresh": 2.0, "active": 5.0, "aged": 24.0}
 
 
+def _compute_phase(conclusive: int) -> tuple[int, str]:
+    """Map a conclusive-signal count to a (phase, banner) tuple."""
+    if conclusive < 30:
+        return 0, f"📊 Phase 0: Calibration — {conclusive}/30 signals · Metrics unlocked at 30"
+    if conclusive < 100:
+        return 1, f"📊 Phase 1: Pilot — {conclusive}/100 signals · Begin paper trading"
+    if conclusive < 300:
+        return 2, f"📊 Phase 2: Evaluation — {conclusive}/300 signals · Small real capital OK"
+    return 3, f"📊 Phase 3: Confident — {conclusive} signals · Normal allocation"
+
+
 def compute_freshness(analyzed_at: str) -> dict:
     """Return freshness_status and freshness_age_hours derived from an ISO UTC timestamp."""
     dt = datetime.fromisoformat(analyzed_at.replace("Z", "+00:00"))
@@ -477,7 +488,8 @@ async def get_performance_summary(user_id: str = DEFAULT_USER_ID) -> dict:
     expired = sum(1 for r in rows if r["outcome"] == "EXPIRED")
 
     conclusive = target_hits + stop_hits
-    phase_gate_active = conclusive < 30
+    phase, phase_banner = _compute_phase(conclusive)
+    phase_gate_active = phase == 0
 
     total_gain = sum(
         r["actual_gain_pct"] for r in rows
@@ -539,6 +551,8 @@ async def get_performance_summary(user_id: str = DEFAULT_USER_ID) -> dict:
         "expired": expired,
         "orphaned_count": orphaned_count,
         "phase_gate_active": phase_gate_active,
+        "phase": phase,
+        "phase_banner": phase_banner,
         "calibration_count": conclusive,
         "hit_ratio": hit_ratio,
         "profit_factor": profit_factor,

@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 import yfinance as yf
 
 from app.db import get_connection, update_outcome_atomic
+from app.db.repository import _compute_phase
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,8 @@ class PerformanceSummary:
     pf_status: str | None
     rr_status: str | None
     below_breakeven: bool
+    phase: int = 0
+    phase_banner: str = ""
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, PerformanceSummary):
@@ -243,7 +246,8 @@ class OutcomeDetector:
         expired = sum(1 for r in rows if r["outcome"] == OUTCOME_EXPIRED)
 
         conclusive = target_hits + stop_hits
-        phase_gate_active = conclusive < 30
+        phase, phase_banner = _compute_phase(conclusive)
+        phase_gate_active = phase == 0
 
         gains = [
             r["actual_gain_pct"]
@@ -299,6 +303,8 @@ class OutcomeDetector:
             expired=expired,
             orphaned_count=orphaned_count,
             phase_gate_active=phase_gate_active,
+            phase=phase,
+            phase_banner=phase_banner,
             calibration_count=conclusive,
             hit_ratio=hit_ratio,
             profit_factor=profit_factor,

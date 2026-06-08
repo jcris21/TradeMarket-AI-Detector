@@ -7,7 +7,7 @@ import pytest
 
 from app.db import init_db, set_db_path
 from app.db.connection import get_connection
-from app.db.repository import get_performance_summary, update_outcome_atomic
+from app.db.repository import _compute_phase, get_performance_summary, update_outcome_atomic
 
 
 @pytest.fixture(autouse=True)
@@ -199,3 +199,49 @@ class TestUpdateOutcomeAtomicSupportBreakLevel:
 
         assert row["outcome"] == "STOP_HIT"
         assert row["support_break_level"] == "S1"
+
+
+@pytest.mark.parametrize(
+    "conclusive,expected_phase,banner_substring",
+    [
+        (0,   0, "Calibration"),
+        (1,   0, "Calibration"),
+        (29,  0, "Calibration"),
+        (30,  1, "Pilot"),
+        (99,  1, "Pilot"),
+        (100, 2, "Evaluation"),
+        (299, 2, "Evaluation"),
+        (300, 3, "Confident"),
+    ],
+)
+def test_compute_phase(conclusive, expected_phase, banner_substring):
+    phase, banner = _compute_phase(conclusive)
+    assert phase == expected_phase
+    assert banner_substring in banner
+
+
+class TestGetPerformanceSummaryPhaseFields:
+    async def test_phase_and_banner_present_in_dict(self):
+        result = await get_performance_summary()
+        assert "phase" in result
+        assert "phase_banner" in result
+        assert isinstance(result["phase"], int)
+        assert isinstance(result["phase_banner"], str)
+
+    async def test_phase_0_below_30_conclusive(self):
+        result = await get_performance_summary()
+        assert result["phase"] == 0
+        assert "Calibration" in result["phase_banner"]
+
+    async def test_phase_1_at_30_conclusive(self):
+        for _ in range(16):
+            sid = await _insert_signal()
+            await update_outcome_atomic(sid, "TARGET_HIT", 5.0, 2.0, 30.0)
+        for _ in range(14):
+            sid = await _insert_signal()
+            await update_outcome_atomic(sid, "STOP_HIT", 2.0, 5.0, 30.0)
+
+        result = await get_performance_summary()
+        assert result["phase"] == 1
+        assert "Pilot" in result["phase_banner"]
+        assert result["phase_gate_active"] is False
