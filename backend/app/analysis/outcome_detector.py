@@ -55,6 +55,8 @@ class PerformanceSummary:
             and self.pf_status == other.pf_status
             and self.rr_status == other.rr_status
             and self.below_breakeven == other.below_breakeven
+            and self.phase == other.phase
+            and self.phase_banner == other.phase_banner
         )
 
 

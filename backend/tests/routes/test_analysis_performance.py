@@ -95,8 +95,8 @@ class TestPerformanceEndpoint:
         assert data["stop_hits"] == 0
         assert data["expired"] == 0
         assert data["orphaned_count"] == 0
-        assert data["hit_ratio"] == 0.0
-        assert data["profit_factor"] == 0.0
+        assert data["hit_ratio"] is None
+        assert data["profit_factor"] is None
 
     async def test_response_has_all_required_fields(self, client):
         resp = await client.get("/api/analysis/performance")
@@ -104,8 +104,11 @@ class TestPerformanceEndpoint:
         required = {
             "total_signals", "target_hits", "stop_hits",
             "expired", "orphaned_count", "hit_ratio", "profit_factor",
+            "phase", "phase_banner",
         }
         assert required <= data.keys()
+        assert data["phase"] == 0
+        assert "Calibration" in data["phase_banner"]
 
     async def test_hit_ratio_correct_with_mixed_outcomes(self, client):
         await _insert_signal("TARGET_HIT", gain_pct=5.0, loss_pct=2.0)

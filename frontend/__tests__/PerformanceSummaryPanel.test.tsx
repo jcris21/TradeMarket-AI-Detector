@@ -4,6 +4,8 @@ import type { PerformanceSummary } from "@/lib/types";
 
 const calibrationSummary: PerformanceSummary = {
   phase_gate_active: true,
+  phase: 0,
+  phase_banner: "📊 Phase 0: Calibration — 15/30 signals · Metrics unlocked at 30",
   calibration_count: 15,
   total_signals: 15,
   target_hits: 10,
@@ -21,6 +23,8 @@ const calibrationSummary: PerformanceSummary = {
 
 const metricsSummary: PerformanceSummary = {
   phase_gate_active: false,
+  phase: 1,
+  phase_banner: "📊 Phase 1: Pilot — 60/100 signals · Begin paper trading",
   calibration_count: 60,
   total_signals: 70,
   target_hits: 40,
@@ -56,10 +60,10 @@ const pfInfinitySummary: PerformanceSummary = {
 };
 
 describe("PerformanceSummaryPanel — calibration state", () => {
-  it("shows Phase 0 Calibration text and count", () => {
+  it("shows Phase 0 Calibration banner text", () => {
     render(<PerformanceSummaryPanel summary={calibrationSummary} />);
-    expect(screen.getByText(/Phase 0 — Calibration/)).toBeInTheDocument();
-    expect(screen.getByText("15/30 signals")).toBeInTheDocument();
+    expect(screen.getByText(/Phase 0: Calibration/)).toBeInTheDocument();
+    expect(screen.getByText(/15\/30 signals/)).toBeInTheDocument();
   });
 
   it("does not render metric rows in calibration state", () => {
@@ -81,25 +85,25 @@ describe("PerformanceSummaryPanel — metrics state", () => {
   it("applies green class to Hit Ratio when hr_status is green", () => {
     render(<PerformanceSummaryPanel summary={metricsSummary} />);
     const hrValue = screen.getByText(/67%/);
-    expect(hrValue).toHaveClass("text-green-400");
+    expect(hrValue).toHaveClass("text-gain");
   });
 
   it("applies red class to Hit Ratio when hr_status is red", () => {
     render(<PerformanceSummaryPanel summary={belowBreakevenSummary} />);
     const hrValue = screen.getByText(/20%/);
-    expect(hrValue).toHaveClass("text-red-400");
+    expect(hrValue).toHaveClass("text-loss");
   });
 
   it("applies green class to Profit Factor when pf_status is green", () => {
     render(<PerformanceSummaryPanel summary={metricsSummary} />);
     const pfValue = screen.getByText("2.18");
-    expect(pfValue).toHaveClass("text-green-400");
+    expect(pfValue).toHaveClass("text-gain");
   });
 
   it("applies red class to Profit Factor when pf_status is red", () => {
     render(<PerformanceSummaryPanel summary={pfRedSummary} />);
     const pfValue = screen.getByText("0.80");
-    expect(pfValue).toHaveClass("text-red-400");
+    expect(pfValue).toHaveClass("text-loss");
   });
 });
 
