@@ -222,3 +222,15 @@ db/finally.db-wal
 backend/static/
 
 .DS_Store
+
+# Editor / AI tool configs (local only)
+.vscode/
+.cursor/
+.codex/
+.agent/
+.claude/worktrees/
+.playwright-mcp/
+
+# Test output
+test/e2e_Results/
+test/test-results/
