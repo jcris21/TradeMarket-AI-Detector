@@ -47,10 +47,10 @@ export default function PerformanceSummaryPanel({ summary }: Props) {
       {/* Header row */}
       <div className="flex items-center justify-between mb-2">
         <span className="text-label-caps text-text-muted">
-          {(() => {
-            const phaseLabel = ["Calibration", "Pilot", "Evaluation", "Confident"][currentPhase] ?? "Unknown";
-            return `Phase ${currentPhase}: ${phaseLabel}`;
-          })()}
+          {(summary.phase_banner ?? "")
+            .replace(/^📊\s*/, "")
+            .split("·")[0]
+            .trim() || `Phase ${currentPhase}`}
         </span>
         <span className="text-label-caps text-accent-blue border border-accent-blue px-2 py-0.5 rounded">
           Live Metrics Active
