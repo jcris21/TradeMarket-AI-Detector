@@ -229,8 +229,10 @@ backend/static/
 .codex/
 .agent/
 .claude/worktrees/
+.worktrees/
 .playwright-mcp/
 
 # Test output
 test/e2e_Results/
 test/test-results/
+.dmux/
