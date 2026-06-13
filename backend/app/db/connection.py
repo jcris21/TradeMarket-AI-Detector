@@ -262,9 +262,17 @@ _ATR_COLUMNS = [
     ("atr_14_pct", "REAL"),
 ]
 
+_ANALYSIS_TICKERS_COLUMNS = [
+    ("sector", "TEXT"),
+    ("sub_sector", "TEXT"),
+    ("seed_version", "TEXT"),
+]
+
 
 async def init_db() -> None:
     """Create tables and seed default data if needed."""
+    # Lazy import avoids circular dependency: app.analysis -> outcome_detector -> app.db
+    from app.analysis.seed_tickers import LEGACY_TICKERS, SEED_TICKERS, SEED_VERSION
     from datetime import timedelta
     db = await get_connection()
     try:
@@ -285,6 +293,69 @@ async def init_db() -> None:
             "CREATE INDEX IF NOT EXISTS idx_analysis_outcome ON analysis_results(outcome)"
         )
 
+        # Lazy migration: add sector/sub_sector/seed_version to analysis_tickers
+        for col, col_type in _ANALYSIS_TICKERS_COLUMNS:
+            try:
+                await db.execute(
+                    f"ALTER TABLE analysis_tickers ADD COLUMN {col} {col_type}"
+                )
+            except aiosqlite.OperationalError as e:
+                if "duplicate column name" not in str(e):
+                    raise
+
+        # Upgrade-seed: 3-path logic to keep analysis_tickers at 100-ticker universe
+        cursor = await db.execute(
+            "SELECT ticker FROM analysis_tickers WHERE user_id = ?", (DEFAULT_USER_ID,)
+        )
+        rows = await cursor.fetchall()
+        existing = frozenset(row[0] for row in rows)
+        seed_now = datetime.now(timezone.utc).isoformat()
+
+        if existing == LEGACY_TICKERS:
+            # Exact legacy 10-ticker install: truncate and replace with all 100
+            await db.execute(
+                "DELETE FROM analysis_tickers WHERE user_id = ?", (DEFAULT_USER_ID,)
+            )
+            await db.executemany(
+                "INSERT INTO analysis_tickers "
+                "(id, user_id, ticker, added_at, sector, sub_sector, seed_version) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                [
+                    (str(uuid.uuid4()), DEFAULT_USER_ID, e["ticker"], seed_now,
+                     e["sector"], e["sub_sector"], SEED_VERSION)
+                    for e in SEED_TICKERS
+                ],
+            )
+            await db.commit()
+        elif not existing:
+            # Fresh install or empty table: seed all 100
+            await db.executemany(
+                "INSERT OR IGNORE INTO analysis_tickers "
+                "(id, user_id, ticker, added_at, sector, sub_sector, seed_version) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                [
+                    (str(uuid.uuid4()), DEFAULT_USER_ID, e["ticker"], seed_now,
+                     e["sector"], e["sub_sector"], SEED_VERSION)
+                    for e in SEED_TICKERS
+                ],
+            )
+            await db.commit()
+        else:
+            # Custom tickers present: additive merge only, never DELETE
+            missing = [e for e in SEED_TICKERS if e["ticker"] not in existing]
+            if missing:
+                await db.executemany(
+                    "INSERT OR IGNORE INTO analysis_tickers "
+                    "(id, user_id, ticker, added_at, sector, sub_sector, seed_version) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    [
+                        (str(uuid.uuid4()), DEFAULT_USER_ID, e["ticker"], seed_now,
+                         e["sector"], e["sub_sector"], SEED_VERSION)
+                        for e in missing
+                    ],
+                )
+                await db.commit()
+
         # Check if default user exists
         cursor = await db.execute(
             "SELECT id FROM users_profile WHERE id = ?", (DEFAULT_USER_ID,)
@@ -304,14 +375,6 @@ async def init_db() -> None:
             for ticker in DEFAULT_TICKERS:
                 await db.execute(
                     "INSERT INTO watchlist (id, user_id, ticker, added_at) VALUES (?, ?, ?, ?)",
-                    (str(uuid.uuid4()), DEFAULT_USER_ID, ticker, now),
-                )
-
-            # Seed default analysis tickers (same as watchlist)
-            for ticker in DEFAULT_TICKERS:
-                await db.execute(
-                    "INSERT OR IGNORE INTO analysis_tickers (id, user_id, ticker, added_at) "
-                    "VALUES (?, ?, ?, ?)",
                     (str(uuid.uuid4()), DEFAULT_USER_ID, ticker, now),
                 )
 

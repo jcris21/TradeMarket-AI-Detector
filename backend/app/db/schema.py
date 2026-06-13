@@ -89,6 +89,9 @@ CREATE TABLE IF NOT EXISTS analysis_tickers (
     user_id TEXT NOT NULL DEFAULT 'default',
     ticker TEXT NOT NULL,
     added_at TEXT NOT NULL,
+    sector TEXT,
+    sub_sector TEXT,
+    seed_version TEXT,
     UNIQUE(user_id, ticker)
 );
 """
