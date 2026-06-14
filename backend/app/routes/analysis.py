@@ -12,6 +12,7 @@ from app.db import (
     get_latest_analysis,
     get_performance_summary,
     remove_analysis_ticker,
+    update_enrichment_delta,
 )
 from app.analysis.models import InvestingComAuthError, PerformanceResponse
 from app.analysis.orchestrator import run_analysis
@@ -27,6 +28,11 @@ class RunRequest(BaseModel):
 
 class AddTickerRequest(BaseModel):
     ticker: str
+
+
+class EnrichRequest(BaseModel):
+    run_id: str
+    delta: float
 
 
 @router.post("/run")
@@ -96,6 +102,25 @@ async def remove_ticker(ticker: str):
 async def get_performance():
     """Return aggregated outcome performance metrics."""
     return await get_performance_summary()
+
+
+@router.post("/{ticker}/enrich")
+async def enrich_ticker(ticker: str, body: EnrichRequest):
+    """Apply a post-hoc enrichment_delta to a ticker's score within a specific run.
+
+    delta must be in [-15, +15]. Returns 404 if no matching row found.
+    """
+    ticker = ticker.upper()
+    if not (-15.0 <= body.delta <= 15.0):
+        raise HTTPException(status_code=422, detail="delta must be between -15 and +15")
+    updated = await update_enrichment_delta(ticker, body.run_id, body.delta)
+    if not updated:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No analysis row found for {ticker} in run {body.run_id}",
+        )
+    result = await get_analysis_by_ticker(ticker)
+    return {"ticker": ticker, "run_id": body.run_id, "enrichment_delta": body.delta, "score_enriched": result.get("score_enriched") if result else None}
 
 
 @router.get("/{ticker}")

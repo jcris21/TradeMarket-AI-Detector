@@ -30,6 +30,7 @@ Public API:
     remove_analysis_ticker  - Remove a ticker from analysis list
     save_analysis_results   - Persist analysis results batch
     update_outcome_atomic   - Atomically write outcome for a signal (idempotent)
+    update_enrichment_delta - Set post-hoc enrichment_delta for a ticker in a run
     get_latest_analysis     - Get most recent analysis run results
     get_analysis_by_ticker  - Get latest analysis for a specific ticker
     get_performance_summary - Compute aggregated outcome metrics
@@ -57,6 +58,7 @@ from .repository import (
     remove_from_watchlist,
     save_analysis_results,
     update_cash_balance,
+    update_enrichment_delta,
     update_outcome_atomic,
     upsert_position,
 )
@@ -87,6 +89,7 @@ __all__ = [
     "remove_analysis_ticker",
     "save_analysis_results",
     "update_outcome_atomic",
+    "update_enrichment_delta",
     "get_performance_summary",
     "DEFAULT_USER_ID",
     "DEFAULT_TICKERS",

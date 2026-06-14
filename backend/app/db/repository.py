@@ -396,8 +396,9 @@ async def save_analysis_results(
                     "risk_reward_ratio, entry_price, target_price, stop_loss, "
                     "support_validated, argument, indicators_summary, screenshot_path, analyzed_at, "
                     "expected_gain_per10, expected_loss_per10, expected_value_per10, "
-                    "hit_rate_used, hit_rate_source, stop_viable, atr_14_pct) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "hit_rate_used, hit_rate_source, stop_viable, atr_14_pct, "
+                    "score_quant, score_legacy, enrichment_delta) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         _uuid(),
                         user_id,
@@ -424,6 +425,9 @@ async def save_analysis_results(
                         row.get("hit_rate_source"),
                         row.get("stop_viable"),
                         row.get("atr_14_pct"),
+                        row.get("score_quant"),
+                        row.get("score_legacy"),
+                        row.get("enrichment_delta"),
                     ),
                 )
                 await db.commit()
@@ -579,6 +583,10 @@ def _parse_analysis_row(row) -> dict:
     sv = d.get("stop_viable")
     if sv is not None:
         d["stop_viable"] = bool(sv)
+    # Compute score_enriched = score_quant + enrichment_delta
+    sq = d.get("score_quant")
+    ed = d.get("enrichment_delta")
+    d["score_enriched"] = round(sq + ed, 2) if (sq is not None and ed is not None) else None
     return d
 
 
@@ -603,6 +611,23 @@ async def get_latest_analysis(user_id: str = DEFAULT_USER_ID) -> list[dict]:
         )
         rows = await cursor.fetchall()
         return [_parse_analysis_row(r) for r in rows]
+    finally:
+        await db.close()
+
+
+async def update_enrichment_delta(
+    ticker: str, run_id: str, delta: float, user_id: str = DEFAULT_USER_ID
+) -> bool:
+    """Set enrichment_delta for a ticker within a specific run. Returns True if updated."""
+    db = await get_connection()
+    try:
+        cursor = await db.execute(
+            "UPDATE analysis_results SET enrichment_delta = ? "
+            "WHERE user_id = ? AND ticker = ? AND run_id = ?",
+            (delta, user_id, ticker.upper(), run_id),
+        )
+        await db.commit()
+        return cursor.rowcount > 0
     finally:
         await db.close()
 

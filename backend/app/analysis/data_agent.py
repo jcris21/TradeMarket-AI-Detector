@@ -140,6 +140,38 @@ def _compute_indicators(ticker: str, df: pd.DataFrame) -> TechnicalIndicators:
         atr_14 = None
         atr_14_pct = None
 
+    # SMA-50
+    sma_50: float | None = None
+    try:
+        sma_50_series = ta.sma(close, length=50)
+        if sma_50_series is not None and not pd.isna(sma_50_series.iloc[-1]):
+            sma_50 = round(float(sma_50_series.iloc[-1]), 4)
+    except Exception:
+        sma_50 = None
+
+    # Bollinger Bands (20, 2)
+    bb_upper: float | None = None
+    bb_lower: float | None = None
+    bb_bandwidth: float | None = None
+    bb_pct_b: float | None = None
+    try:
+        bb_df = ta.bbands(close, length=20, std=2)
+        if bb_df is not None and not bb_df.empty:
+            bbu_col = next((c for c in bb_df.columns if c.startswith("BBU_")), None)
+            bbl_col = next((c for c in bb_df.columns if c.startswith("BBL_")), None)
+            bbb_col = next((c for c in bb_df.columns if c.startswith("BBB_")), None)
+            bbp_col = next((c for c in bb_df.columns if c.startswith("BBP_")), None)
+            if all([bbu_col, bbl_col, bbb_col, bbp_col]):
+                def _safe_bb(col: str) -> float | None:
+                    v = bb_df[col].iloc[-1]
+                    return round(float(v), 4) if not pd.isna(v) else None
+                bb_upper = _safe_bb(bbu_col)
+                bb_lower = _safe_bb(bbl_col)
+                bb_bandwidth = _safe_bb(bbb_col)
+                bb_pct_b = _safe_bb(bbp_col)
+    except Exception:
+        pass
+
     # Support / Resistance — swing levels + volume profile, clustered
     swing_sup, swing_res = _swing_levels(high, low, n=5)
     vp_levels = _volume_profile_levels(close, volume, n_bins=30, top_n=6)
@@ -173,6 +205,11 @@ def _compute_indicators(ticker: str, df: pd.DataFrame) -> TechnicalIndicators:
         resistance_2=round(nearest_res[1], 2),
         atr_14=atr_14,
         atr_14_pct=atr_14_pct,
+        sma_50=sma_50,
+        bb_upper=bb_upper,
+        bb_lower=bb_lower,
+        bb_bandwidth=bb_bandwidth,
+        bb_pct_b=bb_pct_b,
     )
 
 

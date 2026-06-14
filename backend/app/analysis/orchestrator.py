@@ -106,11 +106,19 @@ async def run_analysis(tickers: list[str]) -> AnalysisResult:
         "tickers_error": vision_errors,
     })
 
-    # Inject ATR values from Stage-1 indicators into each AssetAnalysis
+    # Inject ATR + SMA-50 + Bollinger Band values from Stage-1 indicators
     analyses: list[AssetAnalysis] = [
         asset.model_copy(update={
             "atr_14": successful[ticker].atr_14,
             "atr_14_pct": successful[ticker].atr_14_pct,
+            "indicators_summary": {
+                **asset.indicators_summary,
+                "sma_50": successful[ticker].sma_50,
+                "bb_upper": successful[ticker].bb_upper,
+                "bb_lower": successful[ticker].bb_lower,
+                "bb_bandwidth": successful[ticker].bb_bandwidth,
+                "bb_pct_b": successful[ticker].bb_pct_b,
+            },
         })
         for ticker, asset in zip(ticker_list, raw_analyses)
     ]

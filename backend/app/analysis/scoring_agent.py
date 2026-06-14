@@ -71,6 +71,8 @@ def _quarantine_invalid_asset(asset: AssetAnalysis) -> AssetAnalysis:
     """Return an unranked asset with no derived scoring fields."""
     return asset.model_copy(update={
         "score": None,
+        "score_quant": None,
+        "score_legacy": None,
         "score_delta": None,
         "rank": None,
         "expected_gain_per10": None,
@@ -102,14 +104,113 @@ def _indicator_confluence_score(summary: dict) -> float:
     return (bullish_count / 3) * 100
 
 
-def _compute_score(asset: AssetAnalysis, atr_viability_pts: float = 0.0) -> float:
-    """Composite score 0–100."""
+def _compute_score_legacy(asset: AssetAnalysis, atr_viability_pts: float = 0.0) -> float:
+    """Legacy LLM-confidence composite score 0–100 (kept for comparison)."""
     confidence_component = asset.confidence * 40
     rr_normalized = min(asset.risk_reward_ratio / 6.0, 1.0) * 100
     rr_component = rr_normalized * 0.35
     confluence = _indicator_confluence_score(asset.indicators_summary)
     confluence_component = confluence * 0.25
     raw = confidence_component + rr_component + confluence_component + atr_viability_pts
+    return round(max(0.0, min(100.0, raw)), 2)
+
+
+def _compute_score_quant(asset: AssetAnalysis, atr_viability_pts: float = 0.0) -> float:
+    """Pure quantitative score 0–100 — no LLM confidence.
+
+    Components:
+      RR           0/14/22/30 pts  (thresholds: ≥2 / ≥3 / ≥4)
+      Confluence   0–20 pts        (bullish indicator count)
+      Trend        0/3/6/10 pts    (SMA-50 position + MACD signal)
+      ATR          -15/0/+8 pts    (pre-computed by _compute_atr_viability)
+      BB squeeze   0/+8 pts        (BBB < 10 signals pending breakout)
+      Support      0/5/10 pts      (validated + price proximity)
+      Resistance   -5/0/+8 pts     (room above current price)
+      Regime       -10/-5/0/+5 pts (RSI zone)
+    """
+    summary = asset.indicators_summary
+    current_price = float(summary.get("current_price", asset.entry_price) or asset.entry_price)
+
+    # RR component (0–30 pts)
+    rr = asset.risk_reward_ratio
+    if rr >= 4.0:
+        rr_pts = 30.0
+    elif rr >= 3.0:
+        rr_pts = 22.0
+    elif rr >= 2.0:
+        rr_pts = 14.0
+    else:
+        rr_pts = 0.0
+
+    # Confluence component (0–20 pts)
+    conf_pts = _indicator_confluence_score(summary) * 0.20
+
+    # Trend alignment (0/3/6/10 pts)
+    macd = summary.get("macd", "neutral")
+    sma_50_raw = summary.get("sma_50")
+    above_sma50 = (
+        sma_50_raw is not None
+        and current_price > 0
+        and current_price > float(sma_50_raw)
+    )
+    macd_bullish = macd == "bullish_crossover"
+    macd_bearish = macd == "bearish_crossover"
+
+    if above_sma50 and macd_bullish:
+        trend_pts = 10.0
+    elif above_sma50 or macd_bullish:
+        trend_pts = 6.0
+    elif not macd_bearish:
+        trend_pts = 3.0
+    else:
+        trend_pts = 0.0
+
+    # BB squeeze (0/+8 pts) — low bandwidth = pending breakout
+    bb_bw = summary.get("bb_bandwidth")
+    bb_pts = 8.0 if (bb_bw is not None and float(bb_bw) < 10.0) else 0.0
+
+    # Quant support (0/5/10 pts)
+    if asset.support_validated:
+        s1_raw = summary.get("support_1")
+        if s1_raw is not None and current_price > 0:
+            proximity = (current_price - float(s1_raw)) / current_price
+            support_pts = 10.0 if proximity < 0.03 else 5.0
+        else:
+            support_pts = 5.0
+    else:
+        support_pts = 0.0
+
+    # Quant resistance (-5/0/+8 pts)
+    r1_raw = summary.get("resistance_1")
+    if r1_raw is not None and current_price > 0:
+        dist = (float(r1_raw) - current_price) / current_price
+        if dist > 0.05:
+            resistance_pts = 8.0
+        elif dist > 0.01:
+            resistance_pts = 0.0
+        else:
+            resistance_pts = -5.0
+    else:
+        resistance_pts = 0.0
+
+    # Regime adjustment (-10/-5/0/+5 pts)
+    rsi = summary.get("rsi", 50.0)
+    if isinstance(rsi, (int, float)):
+        if rsi > 70:
+            regime_pts = -10.0
+        elif rsi > 60:
+            regime_pts = -5.0
+        elif 30 <= rsi < 50:
+            regime_pts = 5.0
+        else:
+            regime_pts = 0.0
+    else:
+        regime_pts = 0.0
+
+    raw = (
+        rr_pts + conf_pts + trend_pts + atr_viability_pts
+        + bb_pts + support_pts + resistance_pts + regime_pts
+    )
     return round(max(0.0, min(100.0, raw)), 2)
 
 
@@ -140,7 +241,7 @@ async def _get_prior_scores(db: aiosqlite.Connection) -> dict[str, float]:
     """Batch-fetch scores from the previous run. Returns {} on first run or DB error."""
     try:
         cursor = await db.execute(
-            "SELECT ticker, score FROM analysis_results "
+            "SELECT ticker, COALESCE(score_quant, score) AS score FROM analysis_results "
             "WHERE run_id = ("
             "  SELECT run_id FROM analysis_results "
             "  GROUP BY run_id ORDER BY MAX(analyzed_at) DESC LIMIT 1 OFFSET 1"
@@ -234,12 +335,16 @@ def score_and_rank_with_errors(
             scored.append(quarantined.model_copy(update={"stop_viable": False}))
             continue
 
-        s = _compute_score(asset, atr_viability_pts=atr_pts)
-        delta = round(s - _prior.get(asset.ticker, s), 2)
+        sq = _compute_score_quant(asset, atr_viability_pts=atr_pts)
+        sl = _compute_score_legacy(asset, atr_viability_pts=atr_pts)
+        prior_sq = _prior.get(asset.ticker)
+        delta = round(sq - prior_sq, 2) if prior_sq is not None else 0.0
         # stop_viable=None means ATR data was unavailable (pass-through)
         actual_stop_viable = stop_viable if asset.atr_14_pct is not None else None
         with_score = asset.model_copy(update={
-            "score": s,
+            "score": sq,          # backward compat — UI reads this field
+            "score_quant": sq,
+            "score_legacy": sl,
             "score_delta": delta,
             "stop_viable": actual_stop_viable,
         })
@@ -248,7 +353,7 @@ def score_and_rank_with_errors(
     # Separate qualifying from non-qualifying
     def qualifies(a: AssetAnalysis) -> bool:
         return (
-            a.score is not None
+            a.score_quant is not None
             and a.risk_reward_ratio >= min_rr
             and a.signal in ("BUY", "WAIT")
         )
@@ -256,7 +361,7 @@ def score_and_rank_with_errors(
     qualifying = [a for a in scored if qualifies(a)]
     not_qualifying = [a for a in scored if not qualifies(a)]
 
-    qualifying.sort(key=lambda a: a.score or 0, reverse=True)
+    qualifying.sort(key=lambda a: a.score_quant or 0, reverse=True)
     qualifying = qualifying[:top_n]
 
     ranked: list[AssetAnalysis] = []

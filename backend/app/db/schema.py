@@ -81,7 +81,10 @@ CREATE TABLE IF NOT EXISTS analysis_results (
     hold_days REAL,
     support_break_level TEXT,
     stop_viable INTEGER,
-    atr_14_pct REAL
+    atr_14_pct REAL,
+    score_quant REAL,
+    score_legacy REAL,
+    enrichment_delta REAL
 );
 
 CREATE TABLE IF NOT EXISTS analysis_tickers (
