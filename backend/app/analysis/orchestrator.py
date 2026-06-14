@@ -4,17 +4,11 @@ import asyncio
 import logging
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from fastapi import HTTPException
-
-from app.db import (
-    DEFAULT_USER_ID,
-    get_connection,
-    save_analysis_results,
-    save_analysis_run,
-)
+from app.db import get_connection, save_analysis_results
+from app.db.repository import get_analysis_by_ticker
 
 from .data_agent import fetch_indicators_batch
 from .models import AnalysisResult, AssetAnalysis, TechnicalIndicators
@@ -38,12 +32,17 @@ async def run_analysis(tickers: list[str]) -> AnalysisResult:
     batch_results = await fetch_indicators_batch(tickers)
 
     successful: dict[str, TechnicalIndicators] = {}
+    rate_limited_count = 0
     for ticker, result in batch_results.items():
         if isinstance(result, Exception):
+            reason = getattr(result, "reason", "unknown")
+            if reason == "rate_limited":
+                rate_limited_count += 1
             errors.append({
                 "ticker": ticker,
                 "error_message": str(result),
                 "duration_ms": getattr(result, "duration_ms", 0),
+                "reason": reason,
             })
         else:
             successful[ticker] = result
@@ -54,12 +53,83 @@ async def run_analysis(tickers: list[str]) -> AnalysisResult:
         "tickers_total": len(tickers),
         "tickers_ok": len(successful),
         "tickers_error": len(tickers) - len(successful),
+        "rate_limited_count": rate_limited_count,
     })
 
-    if len(successful) < 0.7 * len(tickers):
-        raise HTTPException(
-            status_code=503,
-            detail=f"Insufficient data: {len(successful)}/{len(tickers)} tickers returned valid data",
+    # Staleness fallback: for rate-limited tickers with a <24h cached result,
+    # recover the prior AssetAnalysis and include it in the final result.
+    stale_tickers: list[str] = []
+    stale_analyses: list[AssetAnalysis] = []
+    rate_limited_ticker_list = [e["ticker"] for e in errors if e.get("reason") == "rate_limited"]
+    if rate_limited_ticker_list:
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+        for ticker in rate_limited_ticker_list:
+            cached = await get_analysis_by_ticker(ticker)
+            if cached is None:
+                continue
+            analyzed_at_str = cached.get("analyzed_at")
+            if not analyzed_at_str:
+                continue
+            try:
+                analyzed_at_dt = datetime.fromisoformat(analyzed_at_str.replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if analyzed_at_dt < cutoff:
+                continue
+            try:
+                stale_asset = AssetAnalysis(
+                    ticker=cached["ticker"],
+                    signal=cached.get("signal", "WAIT"),
+                    confidence=cached.get("confidence", 0.0),
+                    entry_price=cached.get("entry_price", 0.0),
+                    target_price=cached.get("target_price", 0.0),
+                    stop_loss=cached.get("stop_loss", 0.0),
+                    risk_reward_ratio=cached.get("risk_reward_ratio", 0.0),
+                    support_validated=bool(cached.get("support_validated", False)),
+                    indicators_summary=cached.get("indicators_summary", {}),
+                    argument=cached.get("argument", ""),
+                    score=cached.get("score"),
+                    score_delta=cached.get("score_delta"),
+                    rank=cached.get("rank"),
+                    expected_gain_per10=cached.get("expected_gain_per10"),
+                    expected_loss_per10=cached.get("expected_loss_per10"),
+                    expected_value_per10=cached.get("expected_value_per10"),
+                    hit_rate_used=cached.get("hit_rate_used"),
+                    hit_rate_source=cached.get("hit_rate_source"),
+                    atr_14_pct=cached.get("atr_14_pct"),
+                    stop_viable=cached.get("stop_viable"),
+                    is_stale=True,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "staleness_fallback_reconstruct_failed",
+                    extra={"ticker": ticker, "error": str(exc)},
+                )
+                continue
+            stale_tickers.append(ticker)
+            stale_analyses.append(stale_asset)
+            errors = [e for e in errors if e["ticker"] != ticker]
+            logger.info(
+                "staleness_fallback_recovered",
+                extra={"ticker": ticker, "analyzed_at": analyzed_at_str},
+            )
+
+    if not successful:
+        duration = round(time.monotonic() - start, 2)
+        logger.info("run_complete", extra={
+            "run_id": run_id,
+            "total_ms": int(duration * 1000),
+            "signals_generated": 0,
+            "error_count": len(errors),
+        })
+        return AnalysisResult(
+            run_id=run_id,
+            analyzed_at=datetime.now(timezone.utc).isoformat(),
+            assets=stale_analyses,
+            top_5=[],
+            errors=errors,
+            duration_seconds=duration,
+            stale_tickers=stale_tickers,
         )
 
     # Stage 2: Load pre-captured screenshots from the screenshots folder
@@ -133,7 +203,6 @@ async def run_analysis(tickers: list[str]) -> AnalysisResult:
     top_5 = [a for a in ranked if a.rank is not None]
 
     # Persist results
-    analysis_error_count = len(errors)  # snapshot before persistence errors are added
     db_rows = [a.to_db_row(run_id) for a in ranked]
     write_errors = await save_analysis_results(db_rows)
     errors.extend(write_errors)
@@ -147,18 +216,6 @@ async def run_analysis(tickers: list[str]) -> AnalysisResult:
     })
 
     duration = round(time.monotonic() - start, 2)
-    analyzed_at = datetime.now(timezone.utc).isoformat()
-
-    await save_analysis_run({
-        "run_id": run_id,
-        "user_id": DEFAULT_USER_ID,
-        "analyzed_at": analyzed_at,
-        "duration_seconds": duration,
-        "total_tickers": len(tickers),
-        "successful_tickers": len(successful),
-        "error_count": analysis_error_count,
-    })
-
     logger.info("run_complete", extra={
         "run_id": run_id,
         "total_ms": int(duration * 1000),
@@ -168,9 +225,10 @@ async def run_analysis(tickers: list[str]) -> AnalysisResult:
 
     return AnalysisResult(
         run_id=run_id,
-        analyzed_at=analyzed_at,
-        assets=ranked,
+        analyzed_at=datetime.now(timezone.utc).isoformat(),
+        assets=ranked + stale_analyses,
         top_5=top_5,
         errors=errors,
         duration_seconds=duration,
+        stale_tickers=stale_tickers,
     )

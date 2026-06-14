@@ -2,7 +2,6 @@
 
 import asyncio
 import logging
-import os
 import time as _time
 
 import pandas as pd
@@ -13,9 +12,43 @@ try:
 except ImportError:
     ta = None  # type: ignore[assignment]
 
+try:
+    from yfinance.exceptions import YFRateLimitError
+except ImportError:
+    class YFRateLimitError(Exception):  # type: ignore[misc]
+        pass
+
 from .models import DataFetchError, TechnicalIndicators
 
 logger = logging.getLogger(__name__)
+
+
+def _download_with_retry(tickers, **kwargs) -> pd.DataFrame:
+    """Wrapper around yf.download with exponential backoff on HTTP 429.
+
+    3 attempts: attempt 0 (no wait) → wait 2s → attempt 1 → wait 4s → attempt 2.
+    Re-raises YFRateLimitError if all 3 attempts are exhausted. Sync — runs in a thread.
+    """
+    max_attempts = 3
+    for attempt in range(max_attempts):
+        try:
+            return yf.download(tickers, **kwargs)
+        except YFRateLimitError:
+            if attempt == max_attempts - 1:
+                raise
+            wait_s = 2 ** (attempt + 1)  # 2s, 4s
+            tickers_count = len(tickers) if isinstance(tickers, list) else 1
+            logger.warning(
+                "yf_rate_limit_retry",
+                extra={
+                    "event": "yf_rate_limit_retry",
+                    "attempt": attempt + 1,
+                    "wait_s": wait_s,
+                    "tickers_count": tickers_count,
+                },
+            )
+            _time.sleep(wait_s)
+    raise YFRateLimitError()
 
 
 def _swing_levels(
@@ -89,7 +122,7 @@ def _compute_indicators(ticker: str, df: pd.DataFrame) -> TechnicalIndicators:
     """Compute MACD, RSI, volume ratio, and S/R levels from OHLCV DataFrame."""
     if ta is None:
         raise DataFetchError("pandas-ta is not installed (requires Python 3.12+)")
-    if df.empty or len(df) < 60:
+    if df.empty or len(df) < 30:
         raise DataFetchError(ticker)
 
     close = df["Close"]
@@ -129,8 +162,6 @@ def _compute_indicators(ticker: str, df: pd.DataFrame) -> TechnicalIndicators:
     volume_ratio = current_vol / sma_vol if sma_vol > 0 else 1.0
 
     current_price = float(close.iloc[-1])
-    if current_price <= 0:
-        raise DataFetchError(ticker)
 
     # ATR (14) — absolute and as % of current price
     atr_14: float | None = None
@@ -195,70 +226,48 @@ def _extract_ticker_df(batch_df: pd.DataFrame, ticker: str) -> pd.DataFrame:
 
 
 async def fetch_indicators_batch(tickers: list[str]) -> dict[str, TechnicalIndicators | Exception]:
-    """Fetch indicators using chunked sequential batch downloads with per-ticker retry.
+    """Fetch indicators for all tickers in a single yfinance call with rate-limit retry.
 
-    Splits tickers into chunks of ANALYSIS_DATA_CHUNK_SIZE (default 20), downloads each
-    chunk sequentially via yf.download with ANALYSIS_DATA_CHUNK_DELAY_S (default 0.5s)
-    between chunks. Any ticker whose DataFrame is empty after the batch pass gets one
-    individual yf.download retry before being recorded as a DataFetchError.
-
-    Env vars are read at call-site so tests can override without module reload.
+    Uses _download_with_retry (3 attempts, exponential backoff) to handle HTTP 429.
+    If all retries are exhausted, all tickers are marked with DataFetchError(reason="rate_limited").
     """
+    logger.debug("Batch-fetching indicators for %d tickers: %s", len(tickers), tickers)
+
     if not tickers:
         return {}
 
-    chunk_size = int(os.environ.get("ANALYSIS_DATA_CHUNK_SIZE", "20"))
-    chunk_delay = float(os.environ.get("ANALYSIS_DATA_CHUNK_DELAY_S", "0.5"))
-    chunks = [tickers[i:i + chunk_size] for i in range(0, len(tickers), chunk_size)]
+    results: dict[str, TechnicalIndicators | Exception] = {}
+    rate_limited = False
 
-    logger.debug(
-        "fetch_indicators_batch: %d tickers in %d chunks of %d",
-        len(tickers), len(chunks), chunk_size,
-    )
-
-    # Step 1: Chunked sequential batch downloads
-    ticker_dfs: dict[str, pd.DataFrame] = {}
-    for idx, chunk in enumerate(chunks):
-        if idx > 0:
-            await asyncio.sleep(chunk_delay)
+    try:
         batch_df: pd.DataFrame = await asyncio.to_thread(
-            yf.download,
-            chunk,
+            _download_with_retry,
+            tickers,
             period="3mo",
             interval="1d",
             progress=False,
             auto_adjust=True,
             group_by="ticker",
         )
-        for ticker in chunk:
-            ticker_dfs[ticker] = _extract_ticker_df(batch_df, ticker)
+    except YFRateLimitError:
+        logger.warning(
+            "yf_batch_rate_limited",
+            extra={"event": "yf_batch_rate_limited", "tickers_count": len(tickers)},
+        )
+        rate_limited = True
+        batch_df = pd.DataFrame()
 
-    # Step 2: Per-ticker retry for any empty DataFrame from the batch pass
-    empty_tickers = [t for t, df in ticker_dfs.items() if df.empty]
-    if empty_tickers:
-        logger.debug("Retrying %d tickers that returned empty DataFrames", len(empty_tickers))
-    for ticker in empty_tickers:
-        try:
-            retry_df: pd.DataFrame = await asyncio.to_thread(
-                yf.download,
-                ticker,
-                period="3mo",
-                interval="1d",
-                progress=False,
-                auto_adjust=True,
-                group_by="ticker",
-            )
-            ticker_dfs[ticker] = _extract_ticker_df(retry_df, ticker)
-        except Exception as exc:
-            logger.warning("Individual retry download failed for %s: %s", ticker, exc)
-            ticker_dfs[ticker] = pd.DataFrame()
-
-    # Step 3: Compute indicators with per-ticker wall-clock timing
-    results: dict[str, TechnicalIndicators | Exception] = {}
+    t_batch_done = _time.monotonic()
     for ticker in tickers:
         t_start = _time.monotonic()
+        if rate_limited:
+            err = DataFetchError(ticker, reason="rate_limited")
+            err.duration_ms = int((_time.monotonic() - t_start) * 1000)
+            results[ticker] = err
+            continue
         try:
-            results[ticker] = _compute_indicators(ticker, ticker_dfs.get(ticker, pd.DataFrame()))
+            ticker_df = _extract_ticker_df(batch_df, ticker)
+            results[ticker] = _compute_indicators(ticker, ticker_df)
         except DataFetchError as exc:
             exc.duration_ms = int((_time.monotonic() - t_start) * 1000)
             results[ticker] = exc

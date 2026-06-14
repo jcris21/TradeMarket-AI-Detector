@@ -35,6 +35,18 @@ function OrphanedBadge() {
   );
 }
 
+function StaleBadge() {
+  return (
+    <span
+      className="px-2 py-0.5 rounded text-xs font-mono font-bold border"
+      style={{ color: "#ecad0a", borderColor: "#ecad0a" }}
+      title="Datos del análisis anterior — yfinance no disponible al momento del run"
+    >
+      Stale data
+    </span>
+  );
+}
+
 function SignalBadge({ signal }: { signal: string }) {
   const colors: Record<string, string> = {
     BUY: "bg-green-900 text-green-300 border border-green-700",
@@ -116,6 +128,7 @@ function SignalTable({
                 <div className="flex items-center gap-1">
                   <SignalBadge signal={asset.signal} />
                   {isOrphaned(asset) && <OrphanedBadge />}
+                  {asset.is_stale && <StaleBadge />}
                 </div>
               </td>
               <td className="px-3 py-0">
