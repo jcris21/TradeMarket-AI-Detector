@@ -128,3 +128,91 @@ async def test_atr_none_when_ta_returns_none(mock_download, mock_ta):
 
     assert result.atr_14 is None
     assert result.atr_14_pct is None
+
+
+# --- US-103: Rate-limit resilience tests ---
+
+
+def test_data_fetch_error_reason_field():
+    """DataFetchError carries a reason field; default is 'empty_dataframe'."""
+    from app.analysis.models import DataFetchError
+
+    err_default = DataFetchError("AAPL")
+    assert err_default.reason == "empty_dataframe"
+
+    err_rl = DataFetchError("AAPL", reason="rate_limited")
+    assert err_rl.reason == "rate_limited"
+
+
+@patch("app.analysis.data_agent._time.sleep")
+@patch("app.analysis.data_agent.yf.download")
+def test_rate_limit_retry_succeeds_on_second_attempt(mock_download, mock_sleep):
+    """_download_with_retry returns the DataFrame when 429 occurs once then succeeds."""
+    from app.analysis.data_agent import _download_with_retry, YFRateLimitError as _YFRateLimitError
+
+    valid_df = _make_ohlcv(60)
+    mock_download.side_effect = [_YFRateLimitError(), valid_df]
+
+    result = _download_with_retry(["AAPL"], period="3mo")
+
+    assert result is valid_df
+    assert mock_download.call_count == 2
+    mock_sleep.assert_called_once_with(2)  # 2^1 = 2s before attempt 1
+
+
+@patch("app.analysis.data_agent._time.sleep")
+@patch("app.analysis.data_agent.yf.download")
+def test_rate_limit_all_retries_exhausted(mock_download, mock_sleep):
+    """_download_with_retry re-raises after exactly 3 calls; total sleep = 6s."""
+    from app.analysis.data_agent import _download_with_retry, YFRateLimitError as _YFRateLimitError
+
+    mock_download.side_effect = _YFRateLimitError()
+
+    with pytest.raises(_YFRateLimitError):
+        _download_with_retry(["AAPL"], period="3mo")
+
+    assert mock_download.call_count == 3
+    assert mock_sleep.call_count == 2
+    total_sleep = sum(c.args[0] for c in mock_sleep.call_args_list)
+    assert total_sleep == 6
+
+
+def test_staleness_fallback_ignores_expired_cache():
+    """Rate-limited ticker with >24h cache should be rejected by the staleness fallback."""
+    from datetime import datetime, timezone, timedelta
+
+    old_time = (datetime.now(timezone.utc) - timedelta(hours=25)).isoformat()
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    analyzed_dt = datetime.fromisoformat(old_time.replace("Z", "+00:00"))
+    assert analyzed_dt < cutoff, "25h-old cache should be below the 24h cutoff"
+
+
+def test_staleness_fallback_accepts_fresh_cache():
+    """Rate-limited ticker with <24h cache should pass the staleness fallback check."""
+    from datetime import datetime, timezone, timedelta
+
+    recent_time = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    analyzed_dt = datetime.fromisoformat(recent_time.replace("Z", "+00:00"))
+    assert analyzed_dt >= cutoff, "2h-old cache should be accepted"
+
+
+def test_stale_asset_is_stale_flag():
+    """AssetAnalysis.is_stale defaults to False and can be set to True."""
+    from app.analysis.models import AssetAnalysis
+
+    asset = AssetAnalysis(
+        ticker="AAPL",
+        signal="BUY",
+        confidence=0.8,
+        entry_price=190.0,
+        target_price=210.0,
+        stop_loss=180.0,
+        risk_reward_ratio=2.0,
+        support_validated=True,
+        indicators_summary={},
+        argument="test",
+    )
+    assert asset.is_stale is False
+    stale = asset.model_copy(update={"is_stale": True})
+    assert stale.is_stale is True

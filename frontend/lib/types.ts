@@ -123,6 +123,7 @@ export interface AssetAnalysis {
   outcome?: "TARGET_HIT" | "STOP_HIT" | "EXPIRED" | null;
   atr_14_pct?: number | null;
   stop_viable?: boolean | null;
+  is_stale?: boolean;
 }
 
 /** Response from POST /api/analysis/run */

@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import time as _time
 
 import pandas as pd
 import yfinance as yf
@@ -11,9 +12,43 @@ try:
 except ImportError:
     ta = None  # type: ignore[assignment]
 
+try:
+    from yfinance.exceptions import YFRateLimitError
+except ImportError:
+    class YFRateLimitError(Exception):  # type: ignore[misc]
+        pass
+
 from .models import DataFetchError, TechnicalIndicators
 
 logger = logging.getLogger(__name__)
+
+
+def _download_with_retry(tickers, **kwargs) -> pd.DataFrame:
+    """Wrapper around yf.download with exponential backoff on HTTP 429.
+
+    3 attempts: attempt 0 (no wait) → wait 2s → attempt 1 → wait 4s → attempt 2.
+    Re-raises YFRateLimitError if all 3 attempts are exhausted. Sync — runs in a thread.
+    """
+    max_attempts = 3
+    for attempt in range(max_attempts):
+        try:
+            return yf.download(tickers, **kwargs)
+        except YFRateLimitError:
+            if attempt == max_attempts - 1:
+                raise
+            wait_s = 2 ** (attempt + 1)  # 2s, 4s
+            tickers_count = len(tickers) if isinstance(tickers, list) else 1
+            logger.warning(
+                "yf_rate_limit_retry",
+                extra={
+                    "event": "yf_rate_limit_retry",
+                    "attempt": attempt + 1,
+                    "wait_s": wait_s,
+                    "tickers_count": tickers_count,
+                },
+            )
+            _time.sleep(wait_s)
+    raise YFRateLimitError()
 
 
 def _swing_levels(
@@ -191,38 +226,56 @@ def _extract_ticker_df(batch_df: pd.DataFrame, ticker: str) -> pd.DataFrame:
 
 
 async def fetch_indicators_batch(tickers: list[str]) -> dict[str, TechnicalIndicators | Exception]:
-    """Fetch indicators for all tickers in a single yfinance call.
+    """Fetch indicators for all tickers in a single yfinance call with rate-limit retry.
 
-    yfinance has a thread-safety issue when called concurrently via asyncio.to_thread —
-    parallel downloads return the same data for all tickers. A single batch download
-    avoids this race condition entirely.
+    Uses _download_with_retry (3 attempts, exponential backoff) to handle HTTP 429.
+    If all retries are exhausted, all tickers are marked with DataFetchError(reason="rate_limited").
     """
     logger.debug("Batch-fetching indicators for %d tickers: %s", len(tickers), tickers)
 
     if not tickers:
         return {}
 
-    # Single batch download — no concurrent race condition
-    batch_df: pd.DataFrame = await asyncio.to_thread(
-        yf.download,
-        tickers,
-        period="3mo",
-        interval="1d",
-        progress=False,
-        auto_adjust=True,
-        group_by="ticker",
-    )
-
     results: dict[str, TechnicalIndicators | Exception] = {}
+    rate_limited = False
+
+    try:
+        batch_df: pd.DataFrame = await asyncio.to_thread(
+            _download_with_retry,
+            tickers,
+            period="3mo",
+            interval="1d",
+            progress=False,
+            auto_adjust=True,
+            group_by="ticker",
+        )
+    except YFRateLimitError:
+        logger.warning(
+            "yf_batch_rate_limited",
+            extra={"event": "yf_batch_rate_limited", "tickers_count": len(tickers)},
+        )
+        rate_limited = True
+        batch_df = pd.DataFrame()
+
+    t_batch_done = _time.monotonic()
     for ticker in tickers:
+        t_start = _time.monotonic()
+        if rate_limited:
+            err = DataFetchError(ticker, reason="rate_limited")
+            err.duration_ms = int((_time.monotonic() - t_start) * 1000)
+            results[ticker] = err
+            continue
         try:
             ticker_df = _extract_ticker_df(batch_df, ticker)
             results[ticker] = _compute_indicators(ticker, ticker_df)
         except DataFetchError as exc:
+            exc.duration_ms = int((_time.monotonic() - t_start) * 1000)
             results[ticker] = exc
         except Exception as exc:
             logger.warning("Indicator computation failed for %s: %s", ticker, exc)
-            results[ticker] = DataFetchError(ticker)
+            err = DataFetchError(ticker)
+            err.duration_ms = int((_time.monotonic() - t_start) * 1000)
+            results[ticker] = err
 
     return results
 

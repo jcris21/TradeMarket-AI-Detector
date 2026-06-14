@@ -49,6 +49,7 @@ class AssetAnalysis(BaseModel):
     atr_14: float | None = None
     atr_14_pct: float | None = None
     stop_viable: bool | None = None
+    is_stale: bool = False
 
     def to_db_row(self, run_id: str) -> dict:
         """Convert to a dict suitable for save_analysis_results()."""
@@ -85,16 +86,18 @@ class AnalysisResult(BaseModel):
     analyzed_at: str
     assets: list[AssetAnalysis]   # all analyzed (ranked + unranked)
     top_5: list[AssetAnalysis]    # filtered and sorted Top N
-    errors: list[dict]            # [{ticker, error_message}]
+    errors: list[dict]            # [{ticker, error_message, reason}]
     duration_seconds: float
+    stale_tickers: list[str] = []
 
 
 class DataFetchError(Exception):
     """Raised when yfinance returns no data for a ticker."""
 
-    def __init__(self, ticker: str) -> None:
+    def __init__(self, ticker: str, reason: str = "empty_dataframe") -> None:
         super().__init__(f"No data available for {ticker}")
         self.ticker = ticker
+        self.reason = reason
 
 
 class InvestingComAuthError(Exception):
