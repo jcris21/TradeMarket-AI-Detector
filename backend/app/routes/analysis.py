@@ -60,9 +60,9 @@ async def trigger_analysis(body: RunRequest):
 
 @router.get("/latest")
 async def get_latest():
-    """Return the most recent cached analysis results."""
-    rows = await get_latest_analysis()
-    return {"results": rows}
+    """Return the most recent cached analysis results with run metadata."""
+    results, run_metadata = await get_latest_analysis()
+    return {"results": results, "run_metadata": run_metadata}
 
 
 @router.get("/tickers")

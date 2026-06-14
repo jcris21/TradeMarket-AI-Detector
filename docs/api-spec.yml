@@ -1094,8 +1094,17 @@ tags:
 
 # ── FinAlly: Analysis endpoints ──────────────────────────────────────────────
 # GET /api/analysis/latest
-# Returns the most recent analysis run results, each augmented with freshness
-# fields computed at read time from analyzed_at.
+# Returns the most recent analysis run results plus run-level metadata.
+#
+# Response shape:
+#   results       array    — ordered by rank; each item is AssetAnalysisWithFreshness (see below)
+#   run_metadata  object | null
+#     run_id              string  — UUID of the most recent run
+#     analyzed_at         string  — ISO 8601 UTC timestamp of run completion
+#     duration_seconds    number  — wall-clock time of the full pipeline in seconds
+#     total_tickers       integer — total tickers submitted to Stage 1
+#     successful_tickers  integer — tickers that passed Stage-1 validation
+#     (null when no run has been recorded, e.g. on a fresh install with only seed data)
 #
 # Response shape per result item (AssetAnalysisWithFreshness):
 #   ticker              string   — e.g. "AAPL"

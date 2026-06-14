@@ -29,8 +29,9 @@ Public API:
     add_analysis_ticker     - Add a ticker to analysis list
     remove_analysis_ticker  - Remove a ticker from analysis list
     save_analysis_results   - Persist analysis results batch
+    save_analysis_run       - Persist per-run metadata (duration, ticker counts)
     update_outcome_atomic   - Atomically write outcome for a signal (idempotent)
-    get_latest_analysis     - Get most recent analysis run results
+    get_latest_analysis     - Get most recent analysis run results + run_metadata
     get_analysis_by_ticker  - Get latest analysis for a specific ticker
     get_performance_summary - Compute aggregated outcome metrics
 """
@@ -56,6 +57,7 @@ from .repository import (
     remove_analysis_ticker,
     remove_from_watchlist,
     save_analysis_results,
+    save_analysis_run,
     update_cash_balance,
     update_outcome_atomic,
     upsert_position,
@@ -86,6 +88,7 @@ __all__ = [
     "get_latest_analysis",
     "remove_analysis_ticker",
     "save_analysis_results",
+    "save_analysis_run",
     "update_outcome_atomic",
     "get_performance_summary",
     "DEFAULT_USER_ID",

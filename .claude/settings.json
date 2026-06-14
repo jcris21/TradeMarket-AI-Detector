@@ -8,16 +8,25 @@
     "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
   },
   "teammateMode": "in-process",
-  "hooks": {
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "cd /c/Users/ASUS/Documents/ProyectosNoCode/Vibe_EngineerExpert_Project/finally && git diff HEAD > planning/REVIEW_HOOK.md 2>&1"
-          }
-        ]
-      }
+  "permissions": {
+    "allow": [
+      "Edit",
+      "Write",
+      "Bash(cd *)",
+      "Bash(uv run*)",
+      "Bash(git add*)",
+      "Bash(git commit*)",
+      "Bash(git log*)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git worktree*)",
+      "Bash(find *)",
+      "Bash(grep *)",
+      "Bash(ls *)",
+      "Bash(cat *)",
+      "Bash(mkdir *)",
+      "Bash(python3*)",
+      "Bash(pytest*)"
     ]
   }
 }

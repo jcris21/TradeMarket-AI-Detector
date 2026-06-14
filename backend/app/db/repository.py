@@ -582,19 +582,70 @@ def _parse_analysis_row(row) -> dict:
     return d
 
 
-async def get_latest_analysis(user_id: str = DEFAULT_USER_ID) -> list[dict]:
-    """Return all rows from the most recent analysis run, ordered by rank."""
+async def save_analysis_run(row: dict) -> None:
+    """Persist one row of per-run metadata to analysis_runs."""
     db = await get_connection()
     try:
-        cursor = await db.execute(
-            "SELECT run_id FROM analysis_results WHERE user_id = ? "
+        await db.execute(
+            "INSERT INTO analysis_runs "
+            "(run_id, user_id, analyzed_at, duration_seconds, "
+            "total_tickers, successful_tickers, error_count) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                row["run_id"],
+                row.get("user_id", DEFAULT_USER_ID),
+                row["analyzed_at"],
+                row["duration_seconds"],
+                row["total_tickers"],
+                row["successful_tickers"],
+                row["error_count"],
+            ),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+async def get_latest_analysis(
+    user_id: str = DEFAULT_USER_ID,
+) -> tuple[list[dict], dict | None]:
+    """Return (results, run_metadata) for the most recent analysis run.
+
+    results is ordered by rank. run_metadata is None when no analysis_runs row
+    matches the latest run_id (e.g. seed data or pre-migration runs).
+    """
+    db = await get_connection()
+    try:
+        # Prefer analysis_runs as the authoritative source for run ordering to
+        # avoid timestamp collisions across rows in analysis_results.
+        run_cursor = await db.execute(
+            "SELECT run_id FROM analysis_runs WHERE user_id = ? "
             "ORDER BY analyzed_at DESC LIMIT 1",
             (user_id,),
         )
-        row = await cursor.fetchone()
-        if not row:
-            return []
-        run_id = row["run_id"]
+        run_row = await run_cursor.fetchone()
+
+        if run_row:
+            run_id = run_row["run_id"]
+            meta_cursor = await db.execute(
+                "SELECT run_id, analyzed_at, duration_seconds, total_tickers, successful_tickers "
+                "FROM analysis_runs WHERE run_id = ? AND user_id = ?",
+                (run_id, user_id),
+            )
+            meta_row = await meta_cursor.fetchone()
+            run_metadata = dict(meta_row) if meta_row else None
+        else:
+            # Legacy path: no analysis_runs rows (pre-NEX-29 data)
+            legacy_cursor = await db.execute(
+                "SELECT run_id FROM analysis_results WHERE user_id = ? "
+                "ORDER BY analyzed_at DESC LIMIT 1",
+                (user_id,),
+            )
+            legacy_row = await legacy_cursor.fetchone()
+            if not legacy_row:
+                return [], None
+            run_id = legacy_row["run_id"]
+            run_metadata = None
 
         cursor = await db.execute(
             "SELECT * FROM analysis_results WHERE user_id = ? AND run_id = ? "
@@ -602,7 +653,7 @@ async def get_latest_analysis(user_id: str = DEFAULT_USER_ID) -> list[dict]:
             (user_id, run_id),
         )
         rows = await cursor.fetchall()
-        return [_parse_analysis_row(r) for r in rows]
+        return [_parse_analysis_row(r) for r in rows], run_metadata
     finally:
         await db.close()
 

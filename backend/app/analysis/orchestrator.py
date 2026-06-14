@@ -7,7 +7,14 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from app.db import get_connection, save_analysis_results
+from fastapi import HTTPException
+
+from app.db import (
+    DEFAULT_USER_ID,
+    get_connection,
+    save_analysis_results,
+    save_analysis_run,
+)
 
 from .data_agent import fetch_indicators_batch
 from .models import AnalysisResult, AssetAnalysis, TechnicalIndicators
@@ -33,7 +40,11 @@ async def run_analysis(tickers: list[str]) -> AnalysisResult:
     successful: dict[str, TechnicalIndicators] = {}
     for ticker, result in batch_results.items():
         if isinstance(result, Exception):
-            errors.append({"ticker": ticker, "error_message": str(result)})
+            errors.append({
+                "ticker": ticker,
+                "error_message": str(result),
+                "duration_ms": getattr(result, "duration_ms", 0),
+            })
         else:
             successful[ticker] = result
 
@@ -45,21 +56,10 @@ async def run_analysis(tickers: list[str]) -> AnalysisResult:
         "tickers_error": len(tickers) - len(successful),
     })
 
-    if not successful:
-        duration = round(time.monotonic() - start, 2)
-        logger.info("run_complete", extra={
-            "run_id": run_id,
-            "total_ms": int(duration * 1000),
-            "signals_generated": 0,
-            "error_count": len(tickers),
-        })
-        return AnalysisResult(
-            run_id=run_id,
-            analyzed_at=datetime.now(timezone.utc).isoformat(),
-            assets=[],
-            top_5=[],
-            errors=errors,
-            duration_seconds=duration,
+    if len(successful) < 0.7 * len(tickers):
+        raise HTTPException(
+            status_code=503,
+            detail=f"Insufficient data: {len(successful)}/{len(tickers)} tickers returned valid data",
         )
 
     # Stage 2: Load pre-captured screenshots from the screenshots folder
@@ -133,6 +133,7 @@ async def run_analysis(tickers: list[str]) -> AnalysisResult:
     top_5 = [a for a in ranked if a.rank is not None]
 
     # Persist results
+    analysis_error_count = len(errors)  # snapshot before persistence errors are added
     db_rows = [a.to_db_row(run_id) for a in ranked]
     write_errors = await save_analysis_results(db_rows)
     errors.extend(write_errors)
@@ -146,6 +147,18 @@ async def run_analysis(tickers: list[str]) -> AnalysisResult:
     })
 
     duration = round(time.monotonic() - start, 2)
+    analyzed_at = datetime.now(timezone.utc).isoformat()
+
+    await save_analysis_run({
+        "run_id": run_id,
+        "user_id": DEFAULT_USER_ID,
+        "analyzed_at": analyzed_at,
+        "duration_seconds": duration,
+        "total_tickers": len(tickers),
+        "successful_tickers": len(successful),
+        "error_count": analysis_error_count,
+    })
+
     logger.info("run_complete", extra={
         "run_id": run_id,
         "total_ms": int(duration * 1000),
@@ -155,7 +168,7 @@ async def run_analysis(tickers: list[str]) -> AnalysisResult:
 
     return AnalysisResult(
         run_id=run_id,
-        analyzed_at=datetime.now(timezone.utc).isoformat(),
+        analyzed_at=analyzed_at,
         assets=ranked,
         top_5=top_5,
         errors=errors,
