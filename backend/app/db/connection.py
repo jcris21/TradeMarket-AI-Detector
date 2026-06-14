@@ -262,6 +262,12 @@ _ATR_COLUMNS = [
     ("atr_14_pct", "REAL"),
 ]
 
+_SCORE_QUANT_COLUMNS = [
+    ("score_quant", "REAL"),
+    ("score_legacy", "REAL"),
+    ("enrichment_delta", "REAL"),
+]
+
 _ANALYSIS_TICKERS_COLUMNS = [
     ("sector", "TEXT"),
     ("sub_sector", "TEXT"),
@@ -279,7 +285,7 @@ async def init_db() -> None:
         await db.executescript(SCHEMA_SQL)
 
         # Lazy migration: add columns if not already present
-        for col, col_type in _BET_SIZE_COLUMNS + _OUTCOME_COLUMNS + _ATR_COLUMNS:
+        for col, col_type in _BET_SIZE_COLUMNS + _OUTCOME_COLUMNS + _ATR_COLUMNS + _SCORE_QUANT_COLUMNS:
             try:
                 await db.execute(
                     f"ALTER TABLE analysis_results ADD COLUMN {col} {col_type}"
@@ -475,3 +481,4 @@ async def init_db() -> None:
             await db.commit()
     finally:
         await db.close()
+

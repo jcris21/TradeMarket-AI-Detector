@@ -396,8 +396,9 @@ async def save_analysis_results(
                     "risk_reward_ratio, entry_price, target_price, stop_loss, "
                     "support_validated, argument, indicators_summary, screenshot_path, analyzed_at, "
                     "expected_gain_per10, expected_loss_per10, expected_value_per10, "
-                    "hit_rate_used, hit_rate_source, stop_viable, atr_14_pct) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "hit_rate_used, hit_rate_source, stop_viable, atr_14_pct, "
+                    "score_quant, score_legacy, enrichment_delta) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         _uuid(),
                         user_id,
@@ -424,6 +425,9 @@ async def save_analysis_results(
                         row.get("hit_rate_source"),
                         row.get("stop_viable"),
                         row.get("atr_14_pct"),
+                        row.get("score_quant"),
+                        row.get("score_legacy"),
+                        row.get("enrichment_delta"),
                     ),
                 )
                 await db.commit()
@@ -579,73 +583,26 @@ def _parse_analysis_row(row) -> dict:
     sv = d.get("stop_viable")
     if sv is not None:
         d["stop_viable"] = bool(sv)
+    # Compute score_enriched = score_quant + enrichment_delta
+    sq = d.get("score_quant")
+    ed = d.get("enrichment_delta")
+    d["score_enriched"] = round(sq + ed, 2) if (sq is not None and ed is not None) else None
     return d
 
 
-async def save_analysis_run(row: dict) -> None:
-    """Persist one row of per-run metadata to analysis_runs."""
+async def get_latest_analysis(user_id: str = DEFAULT_USER_ID) -> list[dict]:
+    """Return all rows from the most recent analysis run, ordered by rank."""
     db = await get_connection()
     try:
-        await db.execute(
-            "INSERT INTO analysis_runs "
-            "(run_id, user_id, analyzed_at, duration_seconds, "
-            "total_tickers, successful_tickers, error_count) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (
-                row["run_id"],
-                row.get("user_id", DEFAULT_USER_ID),
-                row["analyzed_at"],
-                row["duration_seconds"],
-                row["total_tickers"],
-                row["successful_tickers"],
-                row["error_count"],
-            ),
-        )
-        await db.commit()
-    finally:
-        await db.close()
-
-
-async def get_latest_analysis(
-    user_id: str = DEFAULT_USER_ID,
-) -> tuple[list[dict], dict | None]:
-    """Return (results, run_metadata) for the most recent analysis run.
-
-    results is ordered by rank. run_metadata is None when no analysis_runs row
-    matches the latest run_id (e.g. seed data or pre-migration runs).
-    """
-    db = await get_connection()
-    try:
-        # Prefer analysis_runs as the authoritative source for run ordering to
-        # avoid timestamp collisions across rows in analysis_results.
-        run_cursor = await db.execute(
-            "SELECT run_id FROM analysis_runs WHERE user_id = ? "
+        cursor = await db.execute(
+            "SELECT run_id FROM analysis_results WHERE user_id = ? "
             "ORDER BY analyzed_at DESC LIMIT 1",
             (user_id,),
         )
-        run_row = await run_cursor.fetchone()
-
-        if run_row:
-            run_id = run_row["run_id"]
-            meta_cursor = await db.execute(
-                "SELECT run_id, analyzed_at, duration_seconds, total_tickers, successful_tickers "
-                "FROM analysis_runs WHERE run_id = ? AND user_id = ?",
-                (run_id, user_id),
-            )
-            meta_row = await meta_cursor.fetchone()
-            run_metadata = dict(meta_row) if meta_row else None
-        else:
-            # Legacy path: no analysis_runs rows (pre-NEX-29 data)
-            legacy_cursor = await db.execute(
-                "SELECT run_id FROM analysis_results WHERE user_id = ? "
-                "ORDER BY analyzed_at DESC LIMIT 1",
-                (user_id,),
-            )
-            legacy_row = await legacy_cursor.fetchone()
-            if not legacy_row:
-                return [], None
-            run_id = legacy_row["run_id"]
-            run_metadata = None
+        row = await cursor.fetchone()
+        if not row:
+            return []
+        run_id = row["run_id"]
 
         cursor = await db.execute(
             "SELECT * FROM analysis_results WHERE user_id = ? AND run_id = ? "
@@ -653,7 +610,24 @@ async def get_latest_analysis(
             (user_id, run_id),
         )
         rows = await cursor.fetchall()
-        return [_parse_analysis_row(r) for r in rows], run_metadata
+        return [_parse_analysis_row(r) for r in rows]
+    finally:
+        await db.close()
+
+
+async def update_enrichment_delta(
+    ticker: str, run_id: str, delta: float, user_id: str = DEFAULT_USER_ID
+) -> bool:
+    """Set enrichment_delta for a ticker within a specific run. Returns True if updated."""
+    db = await get_connection()
+    try:
+        cursor = await db.execute(
+            "UPDATE analysis_results SET enrichment_delta = ? "
+            "WHERE user_id = ? AND ticker = ? AND run_id = ?",
+            (delta, user_id, ticker.upper(), run_id),
+        )
+        await db.commit()
+        return cursor.rowcount > 0
     finally:
         await db.close()
 
@@ -674,3 +648,4 @@ async def get_analysis_by_ticker(
         return _parse_analysis_row(row) if row else None
     finally:
         await db.close()
+

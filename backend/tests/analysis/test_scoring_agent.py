@@ -6,7 +6,8 @@ import aiosqlite
 from app.analysis.models import AssetAnalysis
 from app.analysis.scoring_agent import (
     _compute_bet_size,
-    _compute_score,
+    _compute_score_legacy,
+    _compute_score_quant,
     _get_hit_rate,
     _get_prior_scores,
     score_and_rank,
@@ -301,16 +302,16 @@ async def _db_with_two_runs(prior_ticker_scores: dict[str, float]) -> aiosqlite.
     db.row_factory = aiosqlite.Row
     await db.execute(
         "CREATE TABLE analysis_results "
-        "(id TEXT, run_id TEXT, ticker TEXT, score REAL, analyzed_at TEXT)"
+        "(id TEXT, run_id TEXT, ticker TEXT, score REAL, score_quant REAL, analyzed_at TEXT)"
     )
     for ticker, score in prior_ticker_scores.items():
         await db.execute(
-            "INSERT INTO analysis_results VALUES (?, 'run-prior', ?, ?, '2026-01-01T00:00:00')",
-            (ticker, ticker, score),
+            "INSERT INTO analysis_results VALUES (?, 'run-prior', ?, ?, ?, '2026-01-01T00:00:00')",
+            (ticker, ticker, score, score),
         )
     # More recent "current" run so OFFSET 1 picks the prior run
     await db.execute(
-        "INSERT INTO analysis_results VALUES ('x', 'run-current', 'DUMMY', 50.0, '2026-01-02T00:00:00')"
+        "INSERT INTO analysis_results VALUES ('x', 'run-current', 'DUMMY', 50.0, 50.0, '2026-01-02T00:00:00')"
     )
     await db.commit()
     return db
@@ -479,9 +480,10 @@ def test_atr_none_fallback():
     # stop_viable should be None (ATR data unavailable)
     assert result.stop_viable is None
 
-    # Score should match baseline (no ATR adjustment)
-    baseline_score = _compute_score(asset)
+    # score == score_quant with no ATR adjustment
+    baseline_score = _compute_score_quant(asset, atr_viability_pts=0.0)
     assert result.score == baseline_score
+    assert result.score_quant == baseline_score
 
 
 def test_atr_regression_rank_order_preserved():
@@ -506,3 +508,133 @@ def test_atr_regression_rank_order_preserved():
     assert qualifiers[0].ticker == "HIGH"
     assert qualifiers[1].ticker == "MID"
     assert qualifiers[2].ticker == "LOW"
+
+
+# ── US-301: Two-Layer Score Architecture tests ────────────────────────────────
+
+def _make_quant_analysis(
+    ticker: str = "T",
+    rr: float = 4.0,
+    macd: str = "bullish_crossover",
+    rsi: float = 55.0,
+    volume: str = "above_avg",
+    support_validated: bool = True,
+    sma_50: float | None = None,
+    bb_bandwidth: float | None = None,
+    support_1: float | None = None,
+    resistance_1: float | None = None,
+    entry_price: float = 100.0,
+    atr_14_pct: float | None = None,
+) -> AssetAnalysis:
+    """Build an AssetAnalysis with all quant scoring fields in indicators_summary."""
+    summary: dict = {"macd": macd, "rsi": rsi, "volume": volume}
+    if sma_50 is not None:
+        summary["sma_50"] = sma_50
+    if bb_bandwidth is not None:
+        summary["bb_bandwidth"] = bb_bandwidth
+    if support_1 is not None:
+        summary["support_1"] = support_1
+    if resistance_1 is not None:
+        summary["resistance_1"] = resistance_1
+    return AssetAnalysis(
+        ticker=ticker,
+        signal="BUY",
+        confidence=0.8,
+        entry_price=entry_price,
+        target_price=entry_price + rr * 10,
+        stop_loss=entry_price - 10,
+        risk_reward_ratio=rr,
+        support_validated=support_validated,
+        indicators_summary=summary,
+        argument="quant test",
+        atr_14_pct=atr_14_pct,
+    )
+
+
+@pytest.mark.parametrize(
+    "rr,expected_pts",
+    [(1.5, 0.0), (2.0, 14.0), (3.0, 22.0), (4.0, 30.0), (5.0, 30.0)],
+    ids=["below_2", "at_2", "at_3", "at_4", "above_4"],
+)
+def test_score_quant_rr_thresholds(rr, expected_pts):
+    """RR component isolation: compare each rr against a rr=1.0 baseline (0 rr_pts)."""
+    # All other inputs identical → difference is purely the RR component
+    base = _make_quant_analysis(rr=1.0, macd="neutral", rsi=55.0, volume="below_avg",
+                                 support_validated=False)
+    asset = _make_quant_analysis(rr=rr, macd="neutral", rsi=55.0, volume="below_avg",
+                                  support_validated=False)
+    sq_base = _compute_score_quant(base, atr_viability_pts=0.0)
+    sq = _compute_score_quant(asset, atr_viability_pts=0.0)
+    assert round(sq - sq_base, 2) == expected_pts
+
+
+def test_score_quant_trend_above_sma50_and_bullish_macd():
+    asset = _make_quant_analysis(entry_price=120.0, sma_50=100.0, macd="bullish_crossover")
+    sq = _compute_score_quant(asset, atr_viability_pts=0.0)
+    # trend_pts should be 10 (above SMA-50 AND bullish MACD)
+    asset_no_sma = _make_quant_analysis(entry_price=120.0, sma_50=None, macd="bullish_crossover")
+    sq_no_sma = _compute_score_quant(asset_no_sma, atr_viability_pts=0.0)
+    assert sq - sq_no_sma == 4.0  # 10 - 6 = 4 pts difference
+
+
+def test_score_quant_bb_squeeze_adds_8_pts():
+    with_squeeze = _make_quant_analysis(bb_bandwidth=5.0)
+    without_squeeze = _make_quant_analysis(bb_bandwidth=None)
+    sq_with = _compute_score_quant(with_squeeze, atr_viability_pts=0.0)
+    sq_without = _compute_score_quant(without_squeeze, atr_viability_pts=0.0)
+    assert sq_with - sq_without == 8.0
+
+
+def test_score_quant_bb_no_squeeze_above_threshold():
+    no_squeeze = _make_quant_analysis(bb_bandwidth=15.0)
+    sq = _compute_score_quant(no_squeeze, atr_viability_pts=0.0)
+    base = _make_quant_analysis(bb_bandwidth=None)
+    sq_base = _compute_score_quant(base, atr_viability_pts=0.0)
+    assert sq == sq_base  # no bonus
+
+
+def test_score_quant_support_proximity_10pts_when_close():
+    # price=100, support_1=98 → proximity=(100-98)/100=2% < 3% → 10 pts
+    close = _make_quant_analysis(entry_price=100.0, support_1=98.0, support_validated=True)
+    far = _make_quant_analysis(entry_price=100.0, support_1=90.0, support_validated=True)
+    sq_close = _compute_score_quant(close, atr_viability_pts=0.0)
+    sq_far = _compute_score_quant(far, atr_viability_pts=0.0)
+    assert sq_close - sq_far == 5.0  # 10 - 5 = 5 pts difference
+
+
+def test_score_quant_regime_overbought_penalty():
+    # Overbought (rsi>70) always scores less than neutral (rsi=55) — delta includes
+    # both the -10 regime penalty AND the loss of confluence (rsi=75 outside [40,65]).
+    overbought = _make_quant_analysis(rsi=75.0)
+    neutral = _make_quant_analysis(rsi=55.0)
+    sq_ob = _compute_score_quant(overbought, atr_viability_pts=0.0)
+    sq_n = _compute_score_quant(neutral, atr_viability_pts=0.0)
+    assert sq_n > sq_ob  # overbought always scores lower
+
+    # Isolate just the regime penalty: compare two RSI values both outside [40,65]
+    # rsi=80 → regime=-10; rsi=67 → regime=-5; neither contributes to confluence
+    rsi80 = _make_quant_analysis(rsi=80.0)
+    rsi67 = _make_quant_analysis(rsi=67.0)
+    sq80 = _compute_score_quant(rsi80, atr_viability_pts=0.0)
+    sq67 = _compute_score_quant(rsi67, atr_viability_pts=0.0)
+    assert sq67 - sq80 == 5.0  # pure regime diff: -5 vs -10
+
+
+def test_score_quant_and_legacy_both_populated():
+    asset = _make_quant_analysis()
+    ranked, _ = score_and_rank_with_errors([asset], min_rr=3.0, top_n=5)
+    result = ranked[0]
+    assert result.score_quant is not None
+    assert result.score_legacy is not None
+    assert result.score == result.score_quant  # backward compat
+
+
+def test_score_enriched_computed_from_score_quant_plus_delta():
+    asset = _make_quant_analysis()
+    ranked, _ = score_and_rank_with_errors([asset], min_rr=3.0, top_n=5)
+    result = ranked[0]
+    # Without enrichment_delta, score_enriched is None
+    assert result.enrichment_delta is None
+    enriched = result.model_copy(update={"enrichment_delta": 10.0})
+    assert enriched.score_enriched == round((enriched.score_quant or 0) + 10.0, 2)
+

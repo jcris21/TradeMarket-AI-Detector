@@ -23,6 +23,11 @@ class TechnicalIndicators:
     resistance_2: float  # 40-period high
     atr_14: float | None = field(default=None)
     atr_14_pct: float | None = field(default=None)
+    sma_50: float | None = field(default=None)
+    bb_upper: float | None = field(default=None)
+    bb_lower: float | None = field(default=None)
+    bb_bandwidth: float | None = field(default=None)
+    bb_pct_b: float | None = field(default=None)
 
 
 class AssetAnalysis(BaseModel):
@@ -39,8 +44,17 @@ class AssetAnalysis(BaseModel):
     indicators_summary: dict
     argument: str
     score: float | None = None
+    score_quant: float | None = None
+    score_legacy: float | None = None
     score_delta: float | None = None
+    enrichment_delta: float | None = None
     rank: int | None = None
+
+    @property
+    def score_enriched(self) -> float | None:
+        if self.score_quant is not None and self.enrichment_delta is not None:
+            return round(self.score_quant + self.enrichment_delta, 2)
+        return None
     expected_gain_per10: float | None = None
     expected_loss_per10: float | None = None
     expected_value_per10: float | None = None
@@ -76,6 +90,9 @@ class AssetAnalysis(BaseModel):
             "hit_rate_source": self.hit_rate_source,
             "atr_14_pct": self.atr_14_pct,
             "stop_viable": int(self.stop_viable) if self.stop_viable is not None else None,
+            "score_quant": self.score_quant,
+            "score_legacy": self.score_legacy,
+            "enrichment_delta": self.enrichment_delta,
         }
 
 

@@ -81,7 +81,10 @@ CREATE TABLE IF NOT EXISTS analysis_results (
     hold_days REAL,
     support_break_level TEXT,
     stop_viable INTEGER,
-    atr_14_pct REAL
+    atr_14_pct REAL,
+    score_quant REAL,
+    score_legacy REAL,
+    enrichment_delta REAL
 );
 
 CREATE TABLE IF NOT EXISTS analysis_tickers (
@@ -94,18 +97,9 @@ CREATE TABLE IF NOT EXISTS analysis_tickers (
     seed_version TEXT,
     UNIQUE(user_id, ticker)
 );
-
-CREATE TABLE IF NOT EXISTS analysis_runs (
-    run_id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL DEFAULT 'default',
-    analyzed_at TEXT NOT NULL,
-    duration_seconds REAL NOT NULL,
-    total_tickers INTEGER NOT NULL,
-    successful_tickers INTEGER NOT NULL,
-    error_count INTEGER NOT NULL
-);
 """
 
 DEFAULT_TICKERS = ["AAPL", "GOOGL", "MSFT", "AMZN", "TSLA", "NVDA", "META", "JPM", "V", "NFLX"]
 DEFAULT_CASH_BALANCE = 10000.0
 DEFAULT_USER_ID = "default"
+
