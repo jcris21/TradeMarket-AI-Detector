@@ -41,21 +41,21 @@
 
 ## 8. Docs
 
-- [ ] 8.1 Update `docs/api-spec.yml` with `POST /api/analysis/{ticker}/enrich` endpoint spec and updated response schemas for existing analysis endpoints
-- [ ] 8.2 Update `docs/data-model.md` with note that back-test scripts must read `score_quant` (not `score`); document `enrichment_delta` and `score_enriched`
+- [x] 8.1 Update `docs/api-spec.yml` with `POST /api/analysis/{ticker}/enrich` endpoint spec and updated response schemas for existing analysis endpoints
+- [x] 8.2 Update `docs/data-model.md` with note that back-test scripts must read `score_quant` (not `score`); document `enrichment_delta` and `score_enriched`
 
 ## 9. Unit Tests
 
 - [x] 9.1 Test each of the 8 `_compute_score_quant()` components in isolation (rr, confluence, trend_alignment, atr_viability, bb_squeeze, quant_support, quant_resistance, regime_adjustment)
 - [x] 9.2 Test score clamping: component sum > 100 → 100; sum < 0 → 0
 - [x] 9.3 Test `_compute_score_quant()` with `None` indicator fields (trend_alignment graceful degradation)
-- [ ] 9.4 Test `enrichment_delta` clamping: confidence=1.0 → +15, confidence=0.0 → −15, confidence=0.5 → 0.0; custom `ENRICHMENT_MAX_DELTA`
+- [x] 9.4 Test `enrichment_delta` clamping: confidence=1.0 → +15, confidence=0.0 → −15, confidence=0.5 → 0.0; custom `ENRICHMENT_MAX_DELTA`
 - [x] 9.5 Test `AssetAnalysis.score_enriched` property: both set → sum; `enrichment_delta=None` → `None`
 - [x] 9.6 Test ranking: two assets — verify sort by `score_quant`, not `score_legacy`
-- [ ] 9.7 Test idempotent migration: running startup twice does not error
+- [x] 9.7 Test idempotent migration: running startup twice does not error
 - [x] 9.8 Test `_get_prior_scores()` queries `score_quant` column; `score_delta` reflects `score_quant` delta
 
 ## 10. Frontend — Score Breakdown Bar (R8)
 
-- [ ] 10.1 Add score breakdown bar to signal detail view: stacked bar showing component contributions (rr, confluence, adjustments); amber glow indicator when `enrichment_delta` is non-null
-- [ ] 10.2 Display `score_enriched` in signal card when present; fall back to `score_quant` label otherwise
+- [x] 10.1 Add score breakdown bar to signal detail view: stacked bar showing component contributions (rr, confluence, adjustments); amber glow indicator when `enrichment_delta` is non-null
+- [x] 10.2 Display `score_enriched` in signal card when present; fall back to `score_quant` label otherwise

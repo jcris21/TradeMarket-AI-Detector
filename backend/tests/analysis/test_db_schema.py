@@ -8,6 +8,7 @@ from app.db.repository import (
     get_latest_analysis,
     remove_analysis_ticker,
     save_analysis_results,
+    update_enrichment_delta,
 )
 
 
@@ -134,3 +135,102 @@ async def test_get_analysis_by_ticker_returns_latest():
 async def test_get_analysis_by_ticker_returns_none_when_missing():
     result = await get_analysis_by_ticker("ZZZZ")
     assert result is None
+
+
+# ── Task 9.4 — enrichment_delta clamping (US-301) ────────────────────────────
+
+def _enrichment_row(ticker: str = "AAPL", run_id: str = "run-enrich") -> dict:
+    return {
+        "run_id": run_id,
+        "ticker": ticker,
+        "rank": 1,
+        "score": 80.0,
+        "score_quant": 80.0,
+        "score_legacy": 72.0,
+        "signal": "BUY",
+        "confidence": 0.8,
+        "risk_reward_ratio": 3.5,
+        "entry_price": 150.0,
+        "target_price": 180.0,
+        "stop_loss": 140.0,
+        "support_validated": True,
+        "argument": "test",
+        "indicators_summary": "{}",
+        "screenshot_path": None,
+    }
+
+
+async def test_update_enrichment_delta_positive_boundary():
+    """delta=+15 (max) is accepted and persisted; score_enriched = score_quant + 15."""
+    await save_analysis_results([_enrichment_row()])
+    updated = await update_enrichment_delta("AAPL", "run-enrich", 15.0)
+    assert updated is True
+    result = await get_analysis_by_ticker("AAPL")
+    assert result is not None
+    assert result["enrichment_delta"] == 15.0
+    assert result["score_enriched"] == round(80.0 + 15.0, 2)
+
+
+async def test_update_enrichment_delta_negative_boundary():
+    """delta=-15 (min) is accepted and persisted; score_enriched = score_quant - 15."""
+    await save_analysis_results([_enrichment_row()])
+    updated = await update_enrichment_delta("AAPL", "run-enrich", -15.0)
+    assert updated is True
+    result = await get_analysis_by_ticker("AAPL")
+    assert result is not None
+    assert result["enrichment_delta"] == -15.0
+    assert result["score_enriched"] == round(80.0 - 15.0, 2)
+
+
+async def test_update_enrichment_delta_zero():
+    """delta=0.0 maps to no change; score_enriched == score_quant."""
+    await save_analysis_results([_enrichment_row()])
+    await update_enrichment_delta("AAPL", "run-enrich", 0.0)
+    result = await get_analysis_by_ticker("AAPL")
+    assert result is not None
+    assert result["enrichment_delta"] == 0.0
+    assert result["score_enriched"] == 80.0
+
+
+async def test_update_enrichment_delta_wrong_run_id_returns_false():
+    """Non-existent run_id returns False (no row updated)."""
+    await save_analysis_results([_enrichment_row()])
+    updated = await update_enrichment_delta("AAPL", "no-such-run", 10.0)
+    assert updated is False
+
+
+async def test_update_enrichment_delta_wrong_ticker_returns_false():
+    """Non-existent ticker for a valid run_id returns False."""
+    await save_analysis_results([_enrichment_row()])
+    updated = await update_enrichment_delta("ZZZZ", "run-enrich", 5.0)
+    assert updated is False
+
+
+async def test_score_enriched_none_when_score_quant_missing():
+    """Row without score_quant yields score_enriched=None even after enrichment."""
+    row = _enrichment_row()
+    row["score_quant"] = None  # pre-US-301 style row
+    await save_analysis_results([row])
+    await update_enrichment_delta("AAPL", "run-enrich", 10.0)
+    result = await get_analysis_by_ticker("AAPL")
+    assert result is not None
+    assert result["score_enriched"] is None
+
+
+# ── Task 9.7 — idempotent migration (US-301) ─────────────────────────────────
+
+async def test_init_db_twice_does_not_error(tmp_path):
+    """Calling init_db() twice on the same database must not raise."""
+    set_db_path(str(tmp_path / "idempotent.db"))
+    await init_db()
+    await init_db()  # second call — ALTER TABLE duplicate-column errors must be silenced
+
+    db = await get_connection()
+    try:
+        cursor = await db.execute("PRAGMA table_info(analysis_results)")
+        cols = {row[1] for row in await cursor.fetchall()}
+        assert "score_quant" in cols
+        assert "score_legacy" in cols
+        assert "enrichment_delta" in cols
+    finally:
+        await db.close()

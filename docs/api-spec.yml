@@ -1139,3 +1139,39 @@ tags:
 #   orphaned_count  integer — signals with outcome IS NULL and analyzed_at > 35 days ago
 #   hit_ratio       number  — target_hits / (target_hits + stop_hits); 0.0 when no conclusive outcomes
 #   profit_factor   number | null — total_gains / total_losses; null when total_losses = 0 and gains > 0
+#
+# ── Two-layer score fields (US-301) ──────────────────────────────────────────
+# Added to AssetAnalysisWithFreshness (GET /api/analysis/latest, GET /api/analysis/{ticker}):
+#
+#   score_quant       number | null — pure quantitative score 0–100 (8-component formula,
+#                                     no LLM input). Canonical ranking key; replaces `score`
+#                                     as the sort field. Equals `score` for backward compat.
+#   score_legacy      number | null — original LLM-confidence weighted score 0–100, kept
+#                                     in parallel for 30-day A/B comparison, then dropped.
+#   enrichment_delta  number | null — optional ±15-pt adjustment applied post-hoc via the
+#                                     enrich endpoint (see below). NULL during/after batch
+#                                     runs; never re-sorts the ranking list.
+#   score_enriched    number | null — derived: score_quant + enrichment_delta. Computed at
+#                                     read time, not stored. NULL when enrichment_delta is NULL.
+#
+# NOTE for back-test scripts: read `score_quant` (not `score`) as the canonical ranking
+# field. `score` remains for backward compat but is now an alias for `score_quant`.
+#
+# POST /api/analysis/{ticker}/enrich
+# Apply a post-hoc enrichment_delta to a ticker's score within a specific run.
+# Intended for visual-enrichment workflows (e.g., VisionAgent) that compute a
+# confidence score after the batch run completes.
+#
+# Request body:
+#   run_id  string  — UUID of the run containing the target row (required)
+#   delta   number  — adjustment in [-15, +15] (required; 422 if out of range)
+#
+# Response (200 OK):
+#   ticker           string         — uppercased ticker symbol
+#   run_id           string         — run UUID from request
+#   enrichment_delta number         — stored delta value
+#   score_enriched   number | null  — score_quant + enrichment_delta; null if score_quant missing
+#
+# Errors:
+#   422 — delta out of [-15, +15] range
+#   404 — no analysis_results row matching (ticker, run_id)

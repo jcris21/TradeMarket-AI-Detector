@@ -2,6 +2,7 @@
 
 import logging
 import os
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -160,3 +161,64 @@ async def test_early_exit_run_complete(mock_save, mock_data, caplog):
     assert len(run_complete_records) == 1
     assert run_complete_records[0].__dict__.get("signals_generated") == 0
     assert result.assets == []
+
+
+# ── US-103 tests ─────────────────────────────────────────────────────────────
+
+@patch.dict(os.environ, {"PLAYWRIGHT_MOCK": "true"})
+@patch("app.analysis.orchestrator.get_analysis_by_ticker", new_callable=AsyncMock)
+@patch("app.analysis.orchestrator.fetch_indicators_batch", new_callable=AsyncMock)
+@patch("app.analysis.orchestrator.save_analysis_results", new_callable=AsyncMock)
+async def test_orchestrator_errors_include_reason(mock_save, mock_data, mock_cached):
+    """DataFetchError.reason is propagated into errors[n]['reason'].
+
+    When no cached result is available the error stays in the errors list.
+    """
+    mock_save.return_value = []
+    mock_data.return_value = {
+        "AAPL": DataFetchError("AAPL", reason="rate_limited"),
+    }
+    mock_cached.return_value = None  # no cached row → staleness fallback skipped
+
+    result = await run_analysis(["AAPL"])
+
+    assert len(result.errors) == 1
+    assert result.errors[0]["ticker"] == "AAPL"
+    assert result.errors[0]["reason"] == "rate_limited"
+
+
+@patch.dict(os.environ, {"PLAYWRIGHT_MOCK": "true"})
+@patch("app.analysis.orchestrator.get_analysis_by_ticker", new_callable=AsyncMock)
+@patch("app.analysis.orchestrator.fetch_indicators_batch", new_callable=AsyncMock)
+@patch("app.analysis.orchestrator.save_analysis_results", new_callable=AsyncMock)
+async def test_staleness_fallback_uses_cached_result(mock_save, mock_data, mock_cached):
+    """Rate-limited ticker with a <24h cached result is recovered as is_stale=True."""
+    mock_save.return_value = []
+    mock_data.return_value = {
+        "AAPL": DataFetchError("AAPL", reason="rate_limited"),
+    }
+    two_hours_ago = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+    mock_cached.return_value = {
+        "ticker": "AAPL",
+        "signal": "BUY",
+        "confidence": 0.8,
+        "entry_price": 150.0,
+        "target_price": 180.0,
+        "stop_loss": 140.0,
+        "risk_reward_ratio": 3.0,
+        "support_validated": True,
+        "indicators_summary": {},
+        "argument": "Cached signal",
+        "analyzed_at": two_hours_ago,
+        "score": 80.0,
+        "rank": 1,
+    }
+
+    result = await run_analysis(["AAPL"])
+
+    assert "AAPL" in result.stale_tickers
+    stale = next((a for a in result.assets if a.ticker == "AAPL"), None)
+    assert stale is not None
+    assert stale.is_stale is True
+    # Recovered stale assets are removed from errors
+    assert not any(e["ticker"] == "AAPL" for e in result.errors)

@@ -111,6 +111,10 @@ export interface AssetAnalysis {
   indicators_summary: Record<string, unknown>;
   argument: string;
   score: number | null;
+  score_quant?: number | null;
+  score_legacy?: number | null;
+  enrichment_delta?: number | null;
+  score_enriched?: number | null;
   rank: number | null;
   analyzed_at?: string;
   freshness_status?: FreshnessStatus;

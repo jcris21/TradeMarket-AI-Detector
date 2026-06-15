@@ -1,11 +1,11 @@
-## ADDED Requirements
+## MODIFIED Requirements
 
 ### Requirement: score_delta computed via single batch SQL query
-The `ScoringAgent` SHALL compute `score_delta` for every `AssetAnalysis` using a single batch query executed before the scoring loop, not N queries inside the loop.
+The `ScoringAgent` SHALL compute `score_delta` for every `AssetAnalysis` using a single batch query executed before the scoring loop. `score_delta` SHALL track `score_quant` delta run-over-run (not the legacy composite `score`). `_get_prior_scores()` SHALL query `score_quant` from the second-most-recent run.
 
 #### Scenario: Standard run with prior run in DB
-- **WHEN** `score_and_rank()` is called with `prior_scores` dict populated from the previous run
-- **THEN** `score_delta = round(current_score - prior_score, 2)` for each ticker present in the prior run
+- **WHEN** `score_and_rank()` is called with `prior_scores` dict populated from the previous run's `score_quant` values
+- **THEN** `score_delta = round(current_score_quant - prior_score_quant, 2)` for each ticker present in the prior run
 
 #### Scenario: New ticker not in prior run
 - **WHEN** a ticker appears in the current run but not in `prior_scores`

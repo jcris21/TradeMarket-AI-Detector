@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import React, { useCallback, useState } from "react";
 import { useAnalysis } from "@/lib/use-analysis";
 import { usePerformance } from "@/lib/use-performance";
 import type { AssetAnalysis } from "@/lib/types";
@@ -72,6 +72,79 @@ function ProgressLabel({ status }: { status: string }) {
   ) : null;
 }
 
+/** Score breakdown bar showing quant components + enrichment glow (10.1 / 10.2). */
+function ScoreBreakdownBar({ asset }: { asset: AssetAnalysis }) {
+  const sq = asset.score_quant ?? asset.score ?? 0;
+  const hasEnrichment = asset.enrichment_delta != null && asset.enrichment_delta !== 0;
+  const displayScore = asset.score_enriched ?? asset.score_quant ?? asset.score;
+  const enrichedLabel = asset.score_enriched != null ? "enriched" : "quant";
+
+  // Approximate component widths based on max possible per component
+  const summary = asset.indicators_summary as Record<string, unknown>;
+  const rr = asset.risk_reward_ratio ?? 0;
+  const rrPct = Math.min((rr >= 4 ? 30 : rr >= 3 ? 22 : rr >= 2 ? 14 : 0) / 100, 1) * 30;
+  const confluencePct = 20;
+  const trendPct = 10;
+  const restPct = Math.max(0, sq - rrPct - confluencePct - trendPct);
+
+  return (
+    <div className="px-3 py-1.5 bg-bg-hover border-b border-border">
+      <div className="flex items-center gap-2 mb-1">
+        <span className="text-xs text-text-muted font-mono">Score</span>
+        <span
+          className={`text-xs font-mono font-bold tabular-nums${hasEnrichment ? " text-amber-400" : " text-white"}`}
+          style={hasEnrichment ? { textShadow: "0 0 8px rgba(251,191,36,0.6)" } : undefined}
+        >
+          {displayScore?.toFixed(1) ?? "—"}
+        </span>
+        <span className="text-xs text-text-muted font-mono">({enrichedLabel})</span>
+        {hasEnrichment && (
+          <span className="text-xs font-mono text-amber-400">
+            Δ{(asset.enrichment_delta ?? 0) > 0 ? "+" : ""}
+            {asset.enrichment_delta?.toFixed(1)}
+          </span>
+        )}
+      </div>
+      <div className="flex h-1.5 rounded overflow-hidden gap-px w-full max-w-xs">
+        <div
+          className="bg-accent-blue opacity-90"
+          style={{ width: `${(rrPct / 100) * 100}%` }}
+          title={`R/R: ${rrPct.toFixed(0)}pts`}
+        />
+        <div
+          className="bg-accent-yellow opacity-70"
+          style={{ width: `${(confluencePct / 100) * 100}%` }}
+          title="Confluence: up to 20pts"
+        />
+        <div
+          className="bg-purple-400 opacity-70"
+          style={{ width: `${(trendPct / 100) * 100}%` }}
+          title="Trend/BB/ATR/Support: up to 34pts"
+        />
+        <div
+          className="bg-gray-500 opacity-50"
+          style={{ width: `${(restPct / 100) * 100}%` }}
+          title="Adjustments"
+        />
+        {hasEnrichment && (
+          <div
+            className="bg-amber-400 opacity-80"
+            style={{ width: `${(Math.abs(asset.enrichment_delta ?? 0) / 100) * 100}%` }}
+            title={`Enrichment: ${asset.enrichment_delta?.toFixed(1)}pts`}
+          />
+        )}
+      </div>
+      <div className="flex gap-3 mt-1 text-label-caps opacity-60">
+        <span style={{ color: "#209dd7" }}>R/R</span>
+        <span style={{ color: "#ecad0a" }}>Conf</span>
+        <span style={{ color: "#a78bfa" }}>Trend</span>
+        <span className="text-gray-400">Adj</span>
+        {hasEnrichment && <span style={{ color: "#fbbf24" }}>Enrich</span>}
+      </div>
+    </div>
+  );
+}
+
 function SignalTable({
   signals,
   onRowClick,
@@ -79,6 +152,8 @@ function SignalTable({
   signals: AssetAnalysis[];
   onRowClick: (asset: AssetAnalysis) => void;
 }) {
+  const [expandedTicker, setExpandedTicker] = useState<string | null>(null);
+
   if (signals.length === 0) {
     return (
       <div className="flex items-center justify-center h-full text-text-muted text-sm py-8">
@@ -107,16 +182,31 @@ function SignalTable({
         {signals.map((asset) => {
           const scoreDimmed =
             asset.freshness_status === "aged" || asset.freshness_status === "expired";
+          const displayScore = asset.score_enriched ?? asset.score_quant ?? asset.score;
+          const hasEnrichment = asset.enrichment_delta != null && asset.enrichment_delta !== 0;
+          const scoreLabel = asset.score_enriched != null ? "E" : asset.score_quant != null ? "Q" : "";
+          const isExpanded = expandedTicker === asset.ticker;
           return (
+            <React.Fragment key={asset.ticker}>
             <tr
-              key={asset.ticker}
-              onClick={() => onRowClick(asset)}
+              onClick={() => {
+                setExpandedTicker(isExpanded ? null : asset.ticker);
+                onRowClick(asset);
+              }}
               className="h-8 border-b border-border hover:bg-bg-hover cursor-pointer transition-colors"
             >
               <td className="px-3 py-0 text-text-muted font-mono">{asset.rank}</td>
               <td className="px-3 py-0 font-mono font-bold text-accent-blue">{asset.ticker}</td>
               <td className={`px-3 py-0 font-mono${scoreDimmed ? " opacity-40" : ""}`}>
-                {asset.score?.toFixed(0) ?? "—"}
+                <span
+                  className={hasEnrichment ? "text-amber-400" : ""}
+                  style={hasEnrichment ? { textShadow: "0 0 6px rgba(251,191,36,0.5)" } : undefined}
+                >
+                  {displayScore?.toFixed(0) ?? "—"}
+                </span>
+                {scoreLabel && (
+                  <span className="ml-0.5 text-label-caps text-text-muted">{scoreLabel}</span>
+                )}
               </td>
               <td className="px-3 py-0 font-mono text-accent-yellow">
                 {asset.risk_reward_ratio.toFixed(1)}x
@@ -166,6 +256,14 @@ function SignalTable({
                 )}
               </td>
             </tr>
+            {isExpanded && (
+              <tr key={`${asset.ticker}-breakdown`} className="border-b border-border">
+                <td colSpan={11} className="p-0">
+                  <ScoreBreakdownBar asset={asset} />
+                </td>
+              </tr>
+            )}
+            </React.Fragment>
           );
         })}
       </tbody>

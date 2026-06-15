@@ -368,5 +368,31 @@ erDiagram
 - All `id` fields serve as primary keys with auto-increment functionality
 - Foreign key relationships maintain referential integrity
 - Optional fields allow for flexible data entry while maintaining required core information
+
+---
+
+## FinAlly — analysis_results Two-Layer Score Architecture (US-301)
+
+The `analysis_results` table stores per-ticker outputs of each analysis run.  
+Three score-related columns were added in US-301:
+
+| Column | Type | Description |
+|---|---|---|
+| `score_quant` | REAL | Pure quantitative score 0–100. 8-component formula (RR, confluence, trend/SMA-50, ATR, BB squeeze, support proximity, resistance room, RSI regime). No LLM input. **Canonical ranking key.** |
+| `score_legacy` | REAL | Original LLM-confidence weighted composite score 0–100. Retained alongside `score_quant` for 30-day A/B comparison, then to be dropped. |
+| `enrichment_delta` | REAL | Optional ±15-pt post-hoc adjustment applied via `POST /api/analysis/{ticker}/enrich`. NULL during and after batch runs. Never re-sorts the ranking list. |
+
+### Derived field: `score_enriched`
+
+`score_enriched = score_quant + enrichment_delta` — computed at read time in the repository (`_parse_analysis_row`) and as an `@property` on `AssetAnalysis`. Not stored in the DB.
+
+### Backward compatibility
+
+The `score` column (pre-US-301) is kept and is set equal to `score_quant` on every new write.  
+Existing rows written before US-301 have `score_quant = NULL`; the prior-score fetch query uses `COALESCE(score_quant, score)` to handle these rows correctly during `score_delta` computation.
+
+### Back-test compatibility note
+
+**Back-test scripts and downstream consumers must read `score_quant` as the canonical ranking field**, not `score`. `score` is a backward-compat alias that may be removed in a future release once all consumers are migrated.
 - The interview system supports multi-step hiring processes with different types of interviews
 - Email fields have unique constraints to prevent duplicate accounts 

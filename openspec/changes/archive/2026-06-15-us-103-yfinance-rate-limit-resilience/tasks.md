@@ -34,8 +34,8 @@
 - [x] 6.2 Write `test_rate_limit_retry_succeeds_on_second_attempt` — mock `yf.download` to raise `YFRateLimitError` once then return a valid DataFrame; assert one retry and one WARNING log
 - [x] 6.3 Write `test_rate_limit_all_retries_exhausted` — mock `yf.download` to always raise `YFRateLimitError`; assert exactly 3 calls, total sleep 6 s, and re-raised exception
 - [x] 6.4 Write `test_data_fetch_error_reason_field` — assert default reason is `"empty_dataframe"` and explicit `reason="rate_limited"` is stored correctly
-- [ ] 6.5 Write `test_orchestrator_errors_include_reason` — mock batch returning `DataFetchError(..., reason="rate_limited")`; assert `errors[0]["reason"] == "rate_limited"`
-- [ ] 6.6 Write `test_staleness_fallback_uses_cached_result` — mock rate-limit failure and `get_analysis_by_ticker` returning a 2 h-old row; assert ticker in `stale_tickers` and `is_stale=True`
+- [x] 6.5 Write `test_orchestrator_errors_include_reason` — mock batch returning `DataFetchError(..., reason="rate_limited")`; assert `errors[0]["reason"] == "rate_limited"`
+- [x] 6.6 Write `test_staleness_fallback_uses_cached_result` — mock rate-limit failure and `get_analysis_by_ticker` returning a 2 h-old row; assert ticker in `stale_tickers` and `is_stale=True`
 - [x] 6.7 Write `test_staleness_fallback_ignores_expired_cache` — same setup with `analyzed_at` 25 h ago; assert ticker remains in `errors`
 
 ## 7. Frontend Stale Badge
