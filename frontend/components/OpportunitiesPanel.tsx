@@ -3,7 +3,7 @@
 import React, { useCallback, useState } from "react";
 import { useAnalysis } from "@/lib/use-analysis";
 import { usePerformance } from "@/lib/use-performance";
-import type { AssetAnalysis } from "@/lib/types";
+import type { AssetAnalysis, RunStatus } from "@/lib/types";
 import BetSizeCell from "@/components/BetSizeCell";
 import FreshnessBadge from "@/components/FreshnessBadge";
 import PerformanceSummaryPanel from "@/components/PerformanceSummaryPanel";
@@ -70,6 +70,77 @@ function ProgressLabel({ status }: { status: string }) {
   return labels[status] ? (
     <span className="text-xs text-text-muted animate-pulse">{labels[status]}</span>
   ) : null;
+}
+
+/** Stage pill (DATA / SCORING) shown during an active run. */
+function StageBadge({ stage }: { stage: RunStatus["stage"] }) {
+  if (stage !== "data" && stage !== "scoring") return null;
+  const label = stage === "data" ? "DATA" : "SCORING";
+  const cls =
+    stage === "data"
+      ? "bg-blue-900 text-blue-300 border-blue-700"
+      : "bg-purple-900 text-purple-300 border-purple-700";
+  return (
+    <span className={`px-2 py-0.5 rounded text-xs font-mono font-bold border ${cls}`}>
+      {label}
+    </span>
+  );
+}
+
+/** Live progress bar + ETA + error badge for an active run (US-204). */
+function RunProgress({
+  runStatus,
+  onPreview,
+  showPreviewButton,
+}: {
+  runStatus: RunStatus;
+  onPreview: () => void;
+  showPreviewButton: boolean;
+}) {
+  const { stage, tickers_completed, tickers_total, estimated_remaining_seconds, errors_so_far } =
+    runStatus;
+  if (stage === "complete" || stage === "failed") return null;
+  const pct =
+    tickers_total > 0 ? Math.min(100, Math.round((tickers_completed / tickers_total) * 100)) : 0;
+  return (
+    <div className="px-4 py-2 border-b border-border space-y-1.5" data-testid="run-progress">
+      <div className="flex items-center gap-2">
+        <StageBadge stage={stage} />
+        <span className="text-xs font-mono text-text-muted tabular-nums">
+          {tickers_completed}/{tickers_total}
+        </span>
+        {estimated_remaining_seconds !== null && (
+          <span className="text-xs font-mono text-text-muted" data-testid="run-eta">
+            ~{Math.round(estimated_remaining_seconds)}s remaining
+          </span>
+        )}
+        {errors_so_far.length > 0 && (
+          <span
+            className="px-1.5 py-0.5 rounded text-xs font-mono font-bold bg-red-900 text-red-300 border border-red-700"
+            title={errors_so_far.map((e) => `${e.ticker}: ${e.error_message}`).join("\n")}
+            data-testid="run-error-badge"
+          >
+            {errors_so_far.length} err
+          </span>
+        )}
+        {showPreviewButton && (
+          <button
+            onClick={onPreview}
+            className="ml-auto px-2 py-0.5 text-xs font-mono bg-bg-hover border border-border rounded hover:border-accent-yellow"
+          >
+            Preview Top 20
+          </button>
+        )}
+      </div>
+      <div className="h-1.5 w-full bg-bg-hover rounded overflow-hidden">
+        <div
+          className="h-full bg-accent-blue transition-all duration-500"
+          style={{ width: `${pct}%` }}
+          data-testid="progress-bar-fill"
+        />
+      </div>
+    </div>
+  );
 }
 
 /** Score breakdown bar showing quant components + enrichment glow (10.1 / 10.2). */
@@ -275,12 +346,34 @@ export default function OpportunitiesPanel({
   onTickerSelect,
   onInjectChat,
 }: OpportunitiesPanelProps) {
-  const { top5, results, status, lastAnalyzedAt, errorMessage, triggerRun, addTicker, getArgument } =
-    useAnalysis();
+  const {
+    top5,
+    results,
+    status,
+    runStatus,
+    previewResults,
+    lastAnalyzedAt,
+    errorMessage,
+    triggerRun,
+    loadPreview,
+    addTicker,
+    getArgument,
+  } = useAnalysis();
   const { performance, isLoading: perfLoading } = usePerformance(status);
   const [newTicker, setNewTicker] = useState("");
   const [addError, setAddError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>("active");
+  const [showPreview, setShowPreview] = useState(false);
+
+  const isRunning = status === "running";
+  const isFailed =
+    status === "error" && runStatus?.stage === "failed" && runStatus.errors_so_far.length > 0;
+  const canPreview = (runStatus?.tickers_completed ?? 0) >= 20;
+
+  const handlePreview = useCallback(async () => {
+    await loadPreview();
+    setShowPreview(true);
+  }, [loadPreview]);
 
   const activeSignals = results.filter((a) => a.freshness_status !== "expired");
   const archivedSignals = results.filter((a) => a.freshness_status === "expired");
@@ -379,10 +472,51 @@ export default function OpportunitiesPanel({
         <PerformanceSummaryPanel summary={performance} />
       ) : null}
 
+      {/* Live run progress */}
+      {isRunning && runStatus && (
+        <RunProgress
+          runStatus={runStatus}
+          onPreview={handlePreview}
+          showPreviewButton={canPreview}
+        />
+      )}
+
+      {/* Failed-run banner (7.10) */}
+      {isFailed && (
+        <div className="mx-4 mt-2 px-3 py-2 bg-red-900/40 border border-red-700 rounded text-xs text-red-300">
+          <div className="font-bold mb-1">Analysis failed</div>
+          <ul className="list-disc list-inside space-y-0.5">
+            {runStatus!.errors_so_far.map((e, i) => (
+              <li key={i}>
+                {e.ticker}: {e.error_message}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {/* Error state */}
-      {errorMessage && (
+      {errorMessage && !isFailed && (
         <div className="mx-4 mt-2 px-3 py-2 bg-red-900/40 border border-red-700 rounded text-xs text-red-300">
           {errorMessage}
+        </div>
+      )}
+
+      {/* Partial preview (7.8) */}
+      {showPreview && previewResults.length > 0 && (
+        <div className="mx-4 mt-2 border border-accent-yellow/40 rounded overflow-hidden">
+          <div className="flex items-center justify-between px-3 py-1.5 bg-bg-hover">
+            <span className="text-xs font-mono text-accent-yellow">
+              Preview Top 20 ({previewResults.length})
+            </span>
+            <button
+              onClick={() => setShowPreview(false)}
+              className="text-xs text-text-muted hover:text-white"
+            >
+              ✕
+            </button>
+          </div>
+          <SignalTable signals={previewResults} onRowClick={handleRowClick} />
         </div>
       )}
 

@@ -1,8 +1,10 @@
 """FastAPI routes for the technical analysis feature."""
 
 import logging
+import uuid
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Response
 from pydantic import BaseModel
 
 from app.db import (
@@ -14,12 +16,36 @@ from app.db import (
     remove_analysis_ticker,
     update_enrichment_delta,
 )
-from app.analysis.models import InvestingComAuthError, PerformanceResponse
+from app.analysis.models import PerformanceResponse
 from app.analysis.orchestrator import run_analysis
+from app.analysis.run_registry import (
+    RunState,
+    evict_expired_runs,
+    get_active_run,
+    get_run,
+    register_run,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/analysis", tags=["analysis"])
+
+_PARTIAL_TOP_N = 20
+
+
+async def _run_analysis_task(tickers: list[str], state: RunState) -> None:
+    """Background task wrapper — runs the pipeline and marks failure on error."""
+    try:
+        await run_analysis(tickers, state=state)
+    except Exception as exc:  # noqa: BLE001 — terminal failure must always be recorded
+        logger.exception("analysis_run_failed", extra={"run_id": state.run_id})
+        state.errors_so_far = [
+            *state.errors_so_far,
+            {"ticker": "*", "error_message": str(exc), "reason": "unhandled"},
+        ]
+        state.stage = "failed"
+        if state.completed_at is None:
+            state.completed_at = datetime.now(timezone.utc).isoformat()
 
 
 class RunRequest(BaseModel):
@@ -35,9 +61,21 @@ class EnrichRequest(BaseModel):
     delta: float
 
 
-@router.post("/run")
-async def trigger_analysis(body: RunRequest):
-    """Trigger a full analysis run. Uses configured tickers if none provided."""
+@router.post("/run", status_code=202)
+async def trigger_analysis(body: RunRequest, background_tasks: BackgroundTasks, response: Response):
+    """Dispatch a full analysis run as a background task (202 Accepted).
+
+    Returns ``{run_id, tickers_total, started_at}`` immediately. Clients poll
+    ``GET /api/analysis/run/{run_id}/status`` for completion, then fetch results
+    from ``GET /api/analysis/latest``. Returns 409 if a run is already active.
+    """
+    evict_expired_runs()
+
+    existing = get_active_run()
+    if existing is not None:
+        response.status_code = 409
+        return {"error": "run_already_in_progress", "run_id": existing.run_id}
+
     tickers = body.tickers
     if not tickers:
         tickers = await get_analysis_tickers()
@@ -46,27 +84,49 @@ async def trigger_analysis(body: RunRequest):
 
     tickers = [t.upper() for t in tickers]
 
-    try:
-        result = await run_analysis(tickers)
-    except InvestingComAuthError as exc:
-        raise HTTPException(
-            status_code=503,
-            detail=f"Could not connect to investing.com: {exc}. Check INVESTING_COM_EMAIL and INVESTING_COM_PASSWORD in .env",
-        )
+    run_id = str(uuid.uuid4())
+    started_at = datetime.now(timezone.utc).isoformat()
+    state = RunState(
+        run_id=run_id,
+        stage="data",
+        tickers_total=len(tickers),
+        started_at=started_at,
+    )
+    register_run(state)
+
+    background_tasks.add_task(_run_analysis_task, tickers, state)
 
     return {
-        "run_id": result.run_id,
-        "analyzed_at": result.analyzed_at,
-        "duration_seconds": result.duration_seconds,
-        "top_5": [a.model_dump() for a in result.top_5],
-        "assets": [a.model_dump() for a in result.assets],
-        "errors": result.errors,
+        "run_id": run_id,
+        "tickers_total": len(tickers),
+        "started_at": started_at,
     }
 
 
+@router.get("/run/{run_id}/status")
+async def get_run_status(run_id: str):
+    """Return live progress for a run. 404 if unknown. In-memory read (< 10 ms)."""
+    evict_expired_runs()
+    state = get_run(run_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail=f"No run found with id {run_id}")
+    return state.to_status_dict()
+
+
 @router.get("/latest")
-async def get_latest():
-    """Return the most recent cached analysis results."""
+async def get_latest(partial: bool = Query(False)):
+    """Return cached analysis results, or in-progress top-20 when partial=true."""
+    if partial:
+        active = get_active_run()
+        if active is None or not active.scored:
+            return {"results": [], "partial": True}
+        ranked = sorted(
+            active.scored,
+            key=lambda a: a.get("score_quant") or 0,
+            reverse=True,
+        )
+        return {"results": ranked[:_PARTIAL_TOP_N], "partial": True}
+
     rows = await get_latest_analysis()
     return {"results": rows}
 

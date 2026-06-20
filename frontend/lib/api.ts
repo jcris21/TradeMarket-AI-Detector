@@ -8,6 +8,8 @@ import type {
   ChatMessage,
   AnalysisRunResponse,
   AnalysisLatestResponse,
+  AnalysisPartialResponse,
+  RunStatus,
   AssetAnalysis,
   PerformanceSummary,
 } from "./types";
@@ -122,11 +124,38 @@ export async function getTickerHistory(
   return request(`/market/history/${ticker}?period=${period}`);
 }
 
-export async function runAnalysis(tickers?: string[]): Promise<AnalysisRunResponse> {
-  return request<AnalysisRunResponse>("/analysis/run", {
+/** Error thrown when POST /api/analysis/run returns 409 (run already active). */
+export class RunInProgressError extends Error {
+  runId: string;
+  constructor(runId: string) {
+    super("run_already_in_progress");
+    this.name = "RunInProgressError";
+    this.runId = runId;
+  }
+}
+
+export async function startAnalysisRun(tickers: string[]): Promise<AnalysisRunResponse> {
+  const res = await fetch(`${BASE}/analysis/run`, {
     method: "POST",
-    body: JSON.stringify({ tickers: tickers ?? null }),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tickers: tickers.length > 0 ? tickers : null }),
   });
+  if (res.status === 409) {
+    const body = await res.json();
+    throw new RunInProgressError(body.run_id);
+  }
+  if (!res.ok) {
+    throw new Error(`${res.status}: ${await res.text()}`);
+  }
+  return res.json();
+}
+
+export async function getRunStatus(runId: string): Promise<RunStatus> {
+  return request<RunStatus>(`/analysis/run/${runId}/status`);
+}
+
+export async function getLatestPartial(): Promise<AnalysisPartialResponse> {
+  return request<AnalysisPartialResponse>("/analysis/latest?partial=true");
 }
 
 export async function getLatestAnalysis(): Promise<AnalysisLatestResponse> {
