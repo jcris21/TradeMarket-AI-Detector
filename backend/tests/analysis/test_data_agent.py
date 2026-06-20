@@ -153,7 +153,7 @@ def test_rate_limit_retry_succeeds_on_second_attempt(mock_download, mock_sleep):
     valid_df = _make_ohlcv(60)
     mock_download.side_effect = [_YFRateLimitError(), valid_df]
 
-    result = _download_with_retry(["AAPL"], period="3mo")
+    result = _download_with_retry(["AAPL"], period="1y")
 
     assert result is valid_df
     assert mock_download.call_count == 2
@@ -195,6 +195,26 @@ def test_staleness_fallback_accepts_fresh_cache():
     cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
     analyzed_dt = datetime.fromisoformat(recent_time.replace("Z", "+00:00"))
     assert analyzed_dt >= cutoff, "2h-old cache should be accepted"
+
+
+# --- US-203: SMA-200 regime gate inputs ---
+
+
+@patch("app.analysis.data_agent.yf.download")
+async def test_sma200_computed(mock_download):
+    """With 250 daily bars, sma_200 is computed as a float."""
+    mock_download.return_value = _make_ohlcv(250)
+    result = await fetch_indicators("AAPL")
+    assert result.sma_200 is not None
+    assert isinstance(result.sma_200, float)
+
+
+@patch("app.analysis.data_agent.yf.download")
+async def test_sma200_none_insufficient_bars(mock_download):
+    """With fewer than 200 bars, sma_200 is None and no exception propagates."""
+    mock_download.return_value = _make_ohlcv(150)
+    result = await fetch_indicators("AAPL")
+    assert result.sma_200 is None
 
 
 def test_stale_asset_is_stale_flag():

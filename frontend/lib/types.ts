@@ -116,6 +116,7 @@ export interface AssetAnalysis {
   enrichment_delta?: number | null;
   score_enriched?: number | null;
   rank: number | null;
+  rank_exclusion_reason?: string | null;
   analyzed_at?: string;
   freshness_status?: FreshnessStatus;
   freshness_age_hours?: number;
@@ -138,6 +139,8 @@ export interface AnalysisRunResponse {
   top_5: AssetAnalysis[];
   assets: AssetAnalysis[];
   errors: Array<{ ticker: string; error_message: string }>;
+  regime_gate_active: boolean;
+  vix_value: number | null;
 }
 
 /** Response from GET /api/analysis/latest */

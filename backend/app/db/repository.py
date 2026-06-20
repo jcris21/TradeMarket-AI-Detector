@@ -397,8 +397,8 @@ async def save_analysis_results(
                     "support_validated, argument, indicators_summary, screenshot_path, analyzed_at, "
                     "expected_gain_per10, expected_loss_per10, expected_value_per10, "
                     "hit_rate_used, hit_rate_source, stop_viable, atr_14_pct, "
-                    "score_quant, score_legacy, enrichment_delta) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "score_quant, score_legacy, enrichment_delta, rank_exclusion_reason) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         _uuid(),
                         user_id,
@@ -428,6 +428,7 @@ async def save_analysis_results(
                         row.get("score_quant"),
                         row.get("score_legacy"),
                         row.get("enrichment_delta"),
+                        row.get("rank_exclusion_reason"),
                     ),
                 )
                 await db.commit()

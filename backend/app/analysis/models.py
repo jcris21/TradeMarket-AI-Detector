@@ -24,6 +24,7 @@ class TechnicalIndicators:
     atr_14: float | None = field(default=None)
     atr_14_pct: float | None = field(default=None)
     sma_50: float | None = field(default=None)
+    sma_200: float | None = field(default=None)
     bb_upper: float | None = field(default=None)
     bb_lower: float | None = field(default=None)
     bb_bandwidth: float | None = field(default=None)
@@ -95,6 +96,7 @@ class AssetAnalysis(BaseModel):
             "score_quant": self.score_quant,
             "score_legacy": self.score_legacy,
             "enrichment_delta": self.enrichment_delta,
+            "rank_exclusion_reason": self.rank_exclusion_reason,
         }
 
 
@@ -109,6 +111,8 @@ class AnalysisResult(BaseModel):
     duration_seconds: float
     stale_tickers: list[str] = []
     sector_cap_exclusions: dict[str, int] = {}
+    regime_gate_active: bool = False
+    vix_value: float | None = None
 
 
 class DataFetchError(Exception):

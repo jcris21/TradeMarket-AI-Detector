@@ -2,10 +2,13 @@
 
 import asyncio
 import logging
+import os
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+import yfinance as yf
 
 from app.db import get_connection, save_analysis_results
 from app.db.repository import get_analysis_by_ticker
@@ -17,6 +20,43 @@ from .vision_agent import analyze_asset
 
 logger = logging.getLogger(__name__)
 
+# VIX gate threshold. Set >= 999 to disable the gate entirely.
+ANALYSIS_VIX_THRESHOLD = float(os.environ.get("ANALYSIS_VIX_THRESHOLD", "25.0"))
+
+
+async def _fetch_vix() -> float | None:
+    """Fetch the latest ^VIX close. Returns None on any error/empty result (fail-open)."""
+    try:
+        df = await asyncio.to_thread(
+            yf.download,
+            "^VIX",
+            period="5d",
+            interval="1d",
+            progress=False,
+            auto_adjust=True,
+        )
+        if df is None or df.empty:
+            logger.warning("vix_fetch_empty", extra={"event": "vix_fetch_empty"})
+            return None
+        close = df["Close"]
+        if hasattr(close, "columns"):  # MultiIndex columns when single ticker via yfinance
+            close = close.iloc[:, 0]
+        return float(close.iloc[-1])
+    except Exception as exc:
+        logger.warning("vix_fetch_failed", extra={"event": "vix_fetch_failed", "error": str(exc)})
+        return None
+
+
+def _apply_vix_gate(asset: AssetAnalysis) -> AssetAnalysis:
+    """Convert a BUY asset to AVOID under an active VIX gate. Non-BUY assets unchanged."""
+    if asset.signal != "BUY":
+        return asset
+    return asset.model_copy(update={
+        "signal": "AVOID",
+        "rank": None,
+        "rank_exclusion_reason": "regime_vix",
+    })
+
 
 async def run_analysis(tickers: list[str]) -> AnalysisResult:
     """Run the full 4-stage analysis pipeline and return an AnalysisResult.
@@ -27,9 +67,21 @@ async def run_analysis(tickers: list[str]) -> AnalysisResult:
     start = time.monotonic()
     errors: list[dict] = []
 
-    # Stage 1: Batch indicator fetch (single yfinance call avoids thread-safety race)
+    # Stage 1: Batch indicator fetch (single yfinance call avoids thread-safety race).
+    # VIX is fetched concurrently so it adds zero latency to the critical path.
     t1 = time.monotonic()
-    batch_results = await fetch_indicators_batch(tickers)
+    batch_results, vix_value = await asyncio.gather(
+        fetch_indicators_batch(tickers),
+        _fetch_vix(),
+    )
+
+    vix_gate_active = vix_value is not None and vix_value > ANALYSIS_VIX_THRESHOLD
+    logger.info("vix_gate_checked", extra={
+        "event": "vix_gate_checked",
+        "vix_value": vix_value,
+        "threshold": ANALYSIS_VIX_THRESHOLD,
+        "gate_active": vix_gate_active,
+    })
 
     successful: dict[str, TechnicalIndicators] = {}
     rate_limited_count = 0
@@ -55,6 +107,38 @@ async def run_analysis(tickers: list[str]) -> AnalysisResult:
         "tickers_error": len(tickers) - len(successful),
         "rate_limited_count": rate_limited_count,
     })
+
+    # SMA-200 regime gate: tickers trading at/below their 200-day SMA are structurally
+    # bearish and suppressed before Stages 2–4 (zero LLM spend). sma_200 is None → fail open.
+    regime_passed: dict[str, TechnicalIndicators] = {}
+    regime_excluded_analyses: list[AssetAnalysis] = []
+    for ticker, indic in successful.items():
+        if indic.sma_200 is not None and indic.current_price <= indic.sma_200:
+            logger.debug(
+                "regime_gate_excluded",
+                extra={
+                    "ticker": ticker,
+                    "current_price": indic.current_price,
+                    "sma_200": indic.sma_200,
+                },
+            )
+            regime_excluded_analyses.append(AssetAnalysis(
+                ticker=ticker,
+                signal="AVOID",
+                confidence=0.0,
+                entry_price=indic.current_price,
+                target_price=indic.current_price,
+                stop_loss=indic.current_price,
+                risk_reward_ratio=0.0,
+                support_validated=False,
+                indicators_summary={"sma_200": indic.sma_200, "current_price": indic.current_price},
+                argument="Suppressed by SMA-200 regime gate: price at or below 200-day moving average.",
+                rank=None,
+                rank_exclusion_reason="regime_bearish",
+            ))
+        else:
+            regime_passed[ticker] = indic
+    successful = regime_passed
 
     # Staleness fallback: for rate-limited tickers with a <24h cached result,
     # recover the prior AssetAnalysis and include it in the final result.
@@ -122,14 +206,17 @@ async def run_analysis(tickers: list[str]) -> AnalysisResult:
             "signals_generated": 0,
             "error_count": len(errors),
         })
+        early_stale = [_apply_vix_gate(a) for a in stale_analyses] if vix_gate_active else stale_analyses
         return AnalysisResult(
             run_id=run_id,
             analyzed_at=datetime.now(timezone.utc).isoformat(),
-            assets=stale_analyses,
+            assets=early_stale + regime_excluded_analyses,
             top_5=[],
             errors=errors,
             duration_seconds=duration,
             stale_tickers=stale_tickers,
+            regime_gate_active=vix_gate_active,
+            vix_value=vix_value,
         )
 
     # Stage 2: Load pre-captured screenshots from the screenshots folder
@@ -208,7 +295,14 @@ async def run_analysis(tickers: list[str]) -> AnalysisResult:
         prior_scores=prior_scores,
     )
     errors.extend(structural_errors)
-    top_5 = [a for a in ranked if a.rank is not None]
+
+    # VIX system-wide gate: when active, convert all BUY signals (new + stale) to AVOID.
+    if vix_gate_active:
+        ranked = [_apply_vix_gate(a) for a in ranked]
+        stale_analyses = [_apply_vix_gate(a) for a in stale_analyses]
+        top_5 = []
+    else:
+        top_5 = [a for a in ranked if a.rank is not None]
 
     # Persist results
     db_rows = [a.to_db_row(run_id) for a in ranked]
@@ -235,10 +329,12 @@ async def run_analysis(tickers: list[str]) -> AnalysisResult:
     return AnalysisResult(
         run_id=run_id,
         analyzed_at=datetime.now(timezone.utc).isoformat(),
-        assets=ranked + stale_analyses,
+        assets=ranked + stale_analyses + regime_excluded_analyses,
         top_5=top_5,
         errors=errors,
         duration_seconds=duration,
         stale_tickers=stale_tickers,
         sector_cap_exclusions=sector_cap_exclusions,
+        regime_gate_active=vix_gate_active,
+        vix_value=vix_value,
     )

@@ -62,6 +62,8 @@ async def trigger_analysis(body: RunRequest):
         "assets": [a.model_dump() for a in result.assets],
         "errors": result.errors,
         "sector_cap_exclusions": result.sector_cap_exclusions,
+        "regime_gate_active": result.regime_gate_active,
+        "vix_value": result.vix_value,
     }
 
 
