@@ -122,4 +122,10 @@ SEED_TICKERS: list[dict[str, str]] = [
     {"ticker": "DUK", "sector": "Utilities", "sub_sector": "Electric Utilities"},
     {"ticker": "SO", "sector": "Utilities", "sub_sector": "Electric Utilities"},
     {"ticker": "AEP", "sector": "Utilities", "sub_sector": "Electric Utilities"},
+    # ETFs (5) — index proxies that bypass the per-sector cap
+    {"ticker": "SPY", "sector": "etf", "sub_sector": "S&P 500 Index"},
+    {"ticker": "QQQ", "sector": "etf", "sub_sector": "Nasdaq 100 Index"},
+    {"ticker": "IWM", "sector": "etf", "sub_sector": "Russell 2000 Index"},
+    {"ticker": "GLD", "sector": "etf", "sub_sector": "Gold"},
+    {"ticker": "TLT", "sector": "etf", "sub_sector": "Long-Term Treasuries"},
 ]

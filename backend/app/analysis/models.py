@@ -49,6 +49,8 @@ class AssetAnalysis(BaseModel):
     score_delta: float | None = None
     enrichment_delta: float | None = None
     rank: int | None = None
+    rank_exclusion_reason: str | None = None
+    sector: str | None = None
 
     @property
     def score_enriched(self) -> float | None:
@@ -106,6 +108,7 @@ class AnalysisResult(BaseModel):
     errors: list[dict]            # [{ticker, error_message, reason}]
     duration_seconds: float
     stale_tickers: list[str] = []
+    sector_cap_exclusions: dict[str, int] = {}
 
 
 class DataFetchError(Exception):

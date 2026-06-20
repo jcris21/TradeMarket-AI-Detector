@@ -61,6 +61,7 @@ async def trigger_analysis(body: RunRequest):
         "top_5": [a.model_dump() for a in result.top_5],
         "assets": [a.model_dump() for a in result.assets],
         "errors": result.errors,
+        "sector_cap_exclusions": result.sector_cap_exclusions,
     }
 
 
