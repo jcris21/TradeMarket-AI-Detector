@@ -131,21 +131,37 @@ export interface AssetAnalysis {
   is_stale?: boolean;
 }
 
-/** Response from POST /api/analysis/run */
+/** Response from POST /api/analysis/run (202 Accepted) */
 export interface AnalysisRunResponse {
   run_id: string;
-  analyzed_at: string;
-  duration_seconds: number;
-  top_5: AssetAnalysis[];
-  assets: AssetAnalysis[];
-  errors: Array<{ ticker: string; error_message: string }>;
-  regime_gate_active: boolean;
-  vix_value: number | null;
+  tickers_total: number;
+  started_at: string;
+}
+
+/** Pipeline stage of an async analysis run (US-204) */
+export type RunStage = "data" | "scoring" | "complete" | "failed";
+
+/** Response from GET /api/analysis/run/{run_id}/status (US-204) */
+export interface RunStatus {
+  run_id: string;
+  stage: RunStage;
+  tickers_total: number;
+  tickers_completed: number;
+  errors_so_far: Array<{ ticker: string; error_message: string; reason?: string }>;
+  started_at: string;
+  completed_at: string | null;
+  estimated_remaining_seconds: number | null;
 }
 
 /** Response from GET /api/analysis/latest */
 export interface AnalysisLatestResponse {
   results: AssetAnalysis[];
+}
+
+/** Response from GET /api/analysis/latest?partial=true (US-204) */
+export interface AnalysisPartialResponse {
+  results: AssetAnalysis[];
+  partial: boolean;
 }
 
 /** Performance summary from GET /api/analysis/performance */

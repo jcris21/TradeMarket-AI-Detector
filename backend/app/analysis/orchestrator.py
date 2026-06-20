@@ -15,6 +15,7 @@ from app.db.repository import get_analysis_by_ticker
 
 from .data_agent import fetch_indicators_batch
 from .models import AnalysisResult, AssetAnalysis, TechnicalIndicators
+from .run_registry import RunState
 from .scoring_agent import _get_hit_rate, _get_prior_scores, score_and_rank_with_errors
 from .vision_agent import analyze_asset
 
@@ -58,17 +59,22 @@ def _apply_vix_gate(asset: AssetAnalysis) -> AssetAnalysis:
     })
 
 
-async def run_analysis(tickers: list[str]) -> AnalysisResult:
+async def run_analysis(
+    tickers: list[str], state: RunState | None = None
+) -> AnalysisResult:
     """Run the full 4-stage analysis pipeline and return an AnalysisResult.
 
-    Saves all results to the DB before returning.
+    Saves all results to the DB before returning. When `state` is provided,
+    the live run registry entry is updated as the pipeline progresses (US-204).
     """
-    run_id = str(uuid.uuid4())
+    run_id = state.run_id if state is not None else str(uuid.uuid4())
     start = time.monotonic()
     errors: list[dict] = []
 
     # Stage 1: Batch indicator fetch (single yfinance call avoids thread-safety race).
     # VIX is fetched concurrently so it adds zero latency to the critical path.
+    if state is not None:
+        state.stage = "data"
     t1 = time.monotonic()
     batch_results, vix_value = await asyncio.gather(
         fetch_indicators_batch(tickers),
@@ -98,6 +104,9 @@ async def run_analysis(tickers: list[str]) -> AnalysisResult:
             })
         else:
             successful[ticker] = result
+        if state is not None:
+            state.tickers_completed += 1
+            state.errors_so_far = errors
 
     logger.info("stage_complete", extra={
         "stage": 1, "run_id": run_id,
@@ -207,6 +216,10 @@ async def run_analysis(tickers: list[str]) -> AnalysisResult:
             "error_count": len(errors),
         })
         early_stale = [_apply_vix_gate(a) for a in stale_analyses] if vix_gate_active else stale_analyses
+        if state is not None:
+            state.errors_so_far = errors
+            state.stage = "complete"
+            state.completed_at = datetime.now(timezone.utc).isoformat()
         return AnalysisResult(
             run_id=run_id,
             analyzed_at=datetime.now(timezone.utc).isoformat(),
@@ -218,6 +231,10 @@ async def run_analysis(tickers: list[str]) -> AnalysisResult:
             regime_gate_active=vix_gate_active,
             vix_value=vix_value,
         )
+
+    # Data phase complete — transition to scoring
+    if state is not None:
+        state.stage = "scoring"
 
     # Stage 2: Load pre-captured screenshots from the screenshots folder
     t2 = time.monotonic()
@@ -325,6 +342,14 @@ async def run_analysis(tickers: list[str]) -> AnalysisResult:
         "signals_generated": len(top_5),
         "error_count": len(errors),
     })
+
+    if state is not None:
+        state.scored = [
+            a.model_dump() for a in ranked if a.score_quant is not None
+        ]
+        state.errors_so_far = errors
+        state.stage = "complete"
+        state.completed_at = datetime.now(timezone.utc).isoformat()
 
     return AnalysisResult(
         run_id=run_id,
