@@ -268,6 +268,10 @@ _SCORE_QUANT_COLUMNS = [
     ("enrichment_delta", "REAL"),
 ]
 
+_REGIME_COLUMNS = [
+    ("rank_exclusion_reason", "TEXT"),
+]
+
 _ANALYSIS_TICKERS_COLUMNS = [
     ("sector", "TEXT"),
     ("sub_sector", "TEXT"),
@@ -285,7 +289,7 @@ async def init_db() -> None:
         await db.executescript(SCHEMA_SQL)
 
         # Lazy migration: add columns if not already present
-        for col, col_type in _BET_SIZE_COLUMNS + _OUTCOME_COLUMNS + _ATR_COLUMNS + _SCORE_QUANT_COLUMNS:
+        for col, col_type in _BET_SIZE_COLUMNS + _OUTCOME_COLUMNS + _ATR_COLUMNS + _SCORE_QUANT_COLUMNS + _REGIME_COLUMNS:
             try:
                 await db.execute(
                     f"ALTER TABLE analysis_results ADD COLUMN {col} {col_type}"

@@ -184,6 +184,15 @@ def _compute_indicators(ticker: str, df: pd.DataFrame) -> TechnicalIndicators:
     except Exception:
         sma_50 = None
 
+    # SMA-200 (regime gate — requires >= 200 daily bars, else None)
+    sma_200: float | None = None
+    try:
+        sma_200_series = ta.sma(close, length=200)
+        if sma_200_series is not None and not pd.isna(sma_200_series.iloc[-1]):
+            sma_200 = round(float(sma_200_series.iloc[-1]), 4)
+    except Exception:
+        sma_200 = None
+
     # Bollinger Bands (20, 2)
     bb_upper: float | None = None
     bb_lower: float | None = None
@@ -241,6 +250,7 @@ def _compute_indicators(ticker: str, df: pd.DataFrame) -> TechnicalIndicators:
         atr_14=atr_14,
         atr_14_pct=atr_14_pct,
         sma_50=sma_50,
+        sma_200=sma_200,
         bb_upper=bb_upper,
         bb_lower=bb_lower,
         bb_bandwidth=bb_bandwidth,
@@ -280,7 +290,7 @@ async def fetch_indicators_batch(tickers: list[str]) -> dict[str, TechnicalIndic
         batch_df: pd.DataFrame = await asyncio.to_thread(
             _download_with_retry,
             tickers,
-            period="3mo",
+            period="1y",
             interval="1d",
             progress=False,
             auto_adjust=True,
@@ -325,7 +335,7 @@ async def fetch_indicators(ticker: str) -> TechnicalIndicators:
     """
     logger.debug("Fetching indicators for %s", ticker)
     df = await asyncio.to_thread(
-        yf.download, ticker, period="3mo", interval="1d", progress=False, auto_adjust=True
+        yf.download, ticker, period="1y", interval="1d", progress=False, auto_adjust=True
     )
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)

@@ -84,7 +84,8 @@ CREATE TABLE IF NOT EXISTS analysis_results (
     atr_14_pct REAL,
     score_quant REAL,
     score_legacy REAL,
-    enrichment_delta REAL
+    enrichment_delta REAL,
+    rank_exclusion_reason TEXT
 );
 
 CREATE TABLE IF NOT EXISTS analysis_tickers (

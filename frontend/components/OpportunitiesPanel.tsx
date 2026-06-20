@@ -275,7 +275,7 @@ export default function OpportunitiesPanel({
   onTickerSelect,
   onInjectChat,
 }: OpportunitiesPanelProps) {
-  const { top5, results, status, lastAnalyzedAt, errorMessage, triggerRun, addTicker, getArgument } =
+  const { top5, results, status, lastAnalyzedAt, errorMessage, regimeGateActive, vixValue, triggerRun, addTicker, getArgument } =
     useAnalysis();
   const { performance, isLoading: perfLoading } = usePerformance(status);
   const [newTicker, setNewTicker] = useState("");
@@ -378,6 +378,18 @@ export default function OpportunitiesPanel({
       ) : performance ? (
         <PerformanceSummaryPanel summary={performance} />
       ) : null}
+
+      {/* Regime gate (VIX) warning banner */}
+      {regimeGateActive && (
+        <div
+          data-testid="regime-gate-banner"
+          className="mx-4 mt-2 px-3 py-2 rounded text-xs font-mono border"
+          style={{ color: "#ecad0a", borderColor: "#ecad0a", backgroundColor: "rgba(236,173,10,0.12)" }}
+          role="alert"
+        >
+          ⚠ Régimen de mercado adverso — VIX {vixValue != null ? vixValue.toFixed(1) : "N/D"} supera el umbral. Todas las señales BUY han sido suprimidas (AVOID).
+        </div>
+      )}
 
       {/* Error state */}
       {errorMessage && (

@@ -17,6 +17,8 @@ interface UseAnalysisReturn {
   status: AnalysisStatus;
   lastAnalyzedAt: string | null;
   errorMessage: string | null;
+  regimeGateActive: boolean;
+  vixValue: number | null;
   triggerRun: () => Promise<void>;
   addTicker: (ticker: string) => Promise<void>;
   getArgument: (ticker: string) => Promise<string | null>;
@@ -27,6 +29,8 @@ export function useAnalysis(): UseAnalysisReturn {
   const [status, setStatus] = useState<AnalysisStatus>("idle");
   const [lastAnalyzedAt, setLastAnalyzedAt] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [regimeGateActive, setRegimeGateActive] = useState<boolean>(false);
+  const [vixValue, setVixValue] = useState<number | null>(null);
 
   const top5 = results.filter((a) => a.rank !== null).sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99));
 
@@ -52,6 +56,9 @@ export function useAnalysis(): UseAnalysisReturn {
       const data = await runAnalysis();
       setResults(data.assets);
       setLastAnalyzedAt(data.analyzed_at);
+      // Clear the banner when the gate is inactive; show it (with VIX) when active.
+      setRegimeGateActive(data.regime_gate_active === true);
+      setVixValue(data.vix_value ?? null);
       setStatus("done");
     } catch (err: unknown) {
       setStatus("error");
@@ -72,5 +79,5 @@ export function useAnalysis(): UseAnalysisReturn {
     }
   }, []);
 
-  return { results, top5, status, lastAnalyzedAt, errorMessage, triggerRun, addTicker, getArgument };
+  return { results, top5, status, lastAnalyzedAt, errorMessage, regimeGateActive, vixValue, triggerRun, addTicker, getArgument };
 }
