@@ -89,7 +89,7 @@ async def test_no_503_at_exactly_threshold():
          patch("app.analysis.orchestrator.get_connection", new_callable=AsyncMock, return_value=mock_db), \
          patch("app.analysis.orchestrator._get_hit_rate", new_callable=AsyncMock, return_value=(0.35, "assumed")), \
          patch("app.analysis.orchestrator._get_prior_scores", new_callable=AsyncMock, return_value={}), \
-         patch("app.analysis.orchestrator.score_and_rank_with_errors", return_value=([mock_asset], [])), \
+         patch("app.analysis.orchestrator.score_and_rank_with_errors", return_value=([mock_asset], [], {})), \
          patch("app.analysis.orchestrator.save_analysis_results", new_callable=AsyncMock, return_value=[]), \
          patch("app.analysis.orchestrator.save_analysis_run", new_callable=AsyncMock):
         mock_batch.return_value = batch

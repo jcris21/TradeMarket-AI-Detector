@@ -77,7 +77,7 @@ def test_validate_asset_analysis_guardrails(asset, expected_valid, expected_reas
     ],
 )
 def test_structurally_invalid_assets_are_not_scored_or_ranked(asset, reason_fragment):
-    ranked, errors = score_and_rank_with_errors([asset], min_rr=3.0, top_n=5)
+    ranked, errors, _ = score_and_rank_with_errors([asset], min_rr=3.0, top_n=5)
 
     assert len(ranked) == 1
     result = ranked[0]
@@ -99,7 +99,7 @@ def test_structurally_invalid_assets_are_not_scored_or_ranked(asset, reason_frag
 def test_valid_asset_guardrail_regression_preserves_scoring_bet_size_and_delta():
     asset = _make_analysis("AAPL")
 
-    ranked, errors = score_and_rank_with_errors(
+    ranked, errors, _ = score_and_rank_with_errors(
         [asset],
         hit_rate=0.35,
         hit_rate_source="assumed",
@@ -128,7 +128,7 @@ def test_structural_errors_are_reported_per_ticker():
         _make_analysis("VALID"),
     ]
 
-    ranked, errors = score_and_rank_with_errors(assets, min_rr=3.0, top_n=5)
+    ranked, errors, _ = score_and_rank_with_errors(assets, min_rr=3.0, top_n=5)
 
     assert {error["ticker"] for error in errors} == {"BAD_STOP", "BAD_TARGET"}
     assert all(error["error_message"].startswith("structural_invalid:") for error in errors)
@@ -401,7 +401,7 @@ def test_atr_hard_disqualify():
     """stop_distance_pct < 0.5 * atr_14_pct → rank=None, error contains atr_disqualify:"""
     # stop_dist=0.03, atr=0.08 → 0.03 < 0.04 (hard floor)
     asset = _make_atr_analysis("HARD", stop_distance_pct=0.03, atr_14_pct=0.08)
-    ranked, errors = score_and_rank_with_errors([asset], min_rr=3.0, top_n=5)
+    ranked, errors, _ = score_and_rank_with_errors([asset], min_rr=3.0, top_n=5)
 
     assert len(ranked) == 1
     result = ranked[0]
@@ -417,8 +417,8 @@ def test_atr_soft_penalty():
     asset = _make_atr_analysis("SOFT", stop_distance_pct=0.05, atr_14_pct=0.08, rr_ratio=4.0)
     baseline_asset = _make_atr_analysis("BASE", stop_distance_pct=0.05, atr_14_pct=None, rr_ratio=4.0)
 
-    ranked_soft, _ = score_and_rank_with_errors([asset], min_rr=3.0, top_n=5)
-    ranked_base, _ = score_and_rank_with_errors([baseline_asset], min_rr=3.0, top_n=5)
+    ranked_soft, _, _ = score_and_rank_with_errors([asset], min_rr=3.0, top_n=5)
+    ranked_base, _, _ = score_and_rank_with_errors([baseline_asset], min_rr=3.0, top_n=5)
 
     soft_score = next(a.score for a in ranked_soft if a.ticker == "SOFT")
     base_score = next(a.score for a in ranked_base if a.ticker == "BASE")
@@ -436,8 +436,8 @@ def test_atr_neutral_band():
     asset = _make_atr_analysis("NEUTRAL", stop_distance_pct=0.08, atr_14_pct=0.08, rr_ratio=4.0)
     baseline_asset = _make_atr_analysis("BASE", stop_distance_pct=0.08, atr_14_pct=None, rr_ratio=4.0)
 
-    ranked_neutral, _ = score_and_rank_with_errors([asset], min_rr=3.0, top_n=5)
-    ranked_base, _ = score_and_rank_with_errors([baseline_asset], min_rr=3.0, top_n=5)
+    ranked_neutral, _, _ = score_and_rank_with_errors([asset], min_rr=3.0, top_n=5)
+    ranked_base, _, _ = score_and_rank_with_errors([baseline_asset], min_rr=3.0, top_n=5)
 
     neutral_score = next(a.score for a in ranked_neutral if a.ticker == "NEUTRAL")
     base_score = next(a.score for a in ranked_base if a.ticker == "BASE")
@@ -453,8 +453,8 @@ def test_atr_boost():
     asset = _make_atr_analysis("BOOST", stop_distance_pct=0.15, atr_14_pct=0.08, rr_ratio=4.0)
     baseline_asset = _make_atr_analysis("BASE", stop_distance_pct=0.15, atr_14_pct=None, rr_ratio=4.0)
 
-    ranked_boost, _ = score_and_rank_with_errors([asset], min_rr=3.0, top_n=5)
-    ranked_base, _ = score_and_rank_with_errors([baseline_asset], min_rr=3.0, top_n=5)
+    ranked_boost, _, _ = score_and_rank_with_errors([asset], min_rr=3.0, top_n=5)
+    ranked_base, _, _ = score_and_rank_with_errors([baseline_asset], min_rr=3.0, top_n=5)
 
     boost_score = next(a.score for a in ranked_boost if a.ticker == "BOOST")
     base_score = next(a.score for a in ranked_base if a.ticker == "BASE")
@@ -470,7 +470,7 @@ def test_atr_none_fallback():
     """Asset with atr_14_pct=None passes scoring unchanged with stop_viable=None."""
     asset = _make_atr_analysis("NOATR", stop_distance_pct=0.10, atr_14_pct=None, rr_ratio=4.0)
 
-    ranked, errors = score_and_rank_with_errors([asset], min_rr=3.0, top_n=5)
+    ranked, errors, _ = score_and_rank_with_errors([asset], min_rr=3.0, top_n=5)
     result = next(a for a in ranked if a.ticker == "NOATR")
 
     # No ATR errors
@@ -499,7 +499,7 @@ def test_atr_regression_rank_order_preserved():
                             confidence=0.5, rr_ratio=3.0),
     ]
 
-    ranked, errors = score_and_rank_with_errors(assets, min_rr=3.0, top_n=5)
+    ranked, errors, _ = score_and_rank_with_errors(assets, min_rr=3.0, top_n=5)
     atr_errors = [e for e in errors if "atr_disqualify" in e.get("error_message", "")]
     assert atr_errors == []
 
@@ -622,7 +622,7 @@ def test_score_quant_regime_overbought_penalty():
 
 def test_score_quant_and_legacy_both_populated():
     asset = _make_quant_analysis()
-    ranked, _ = score_and_rank_with_errors([asset], min_rr=3.0, top_n=5)
+    ranked, _, _ = score_and_rank_with_errors([asset], min_rr=3.0, top_n=5)
     result = ranked[0]
     assert result.score_quant is not None
     assert result.score_legacy is not None
@@ -631,10 +631,133 @@ def test_score_quant_and_legacy_both_populated():
 
 def test_score_enriched_computed_from_score_quant_plus_delta():
     asset = _make_quant_analysis()
-    ranked, _ = score_and_rank_with_errors([asset], min_rr=3.0, top_n=5)
+    ranked, _, _ = score_and_rank_with_errors([asset], min_rr=3.0, top_n=5)
     result = ranked[0]
     # Without enrichment_delta, score_enriched is None
     assert result.enrichment_delta is None
     enriched = result.model_copy(update={"enrichment_delta": 10.0})
     assert enriched.score_enriched == round((enriched.score_quant or 0) + 10.0, 2)
+
+
+# ── US-202: Sector cap enforcement tests ──────────────────────────────────────
+
+def _make_sector_analysis(
+    ticker: str,
+    sector: str | None,
+    rr_ratio: float = 4.0,
+    confidence: float = 0.8,
+) -> AssetAnalysis:
+    """Build a qualifying AssetAnalysis with a given sector."""
+    asset = _make_analysis(ticker, rr_ratio=rr_ratio, confidence=confidence)
+    return asset.model_copy(update={"sector": sector})
+
+
+def test_sector_cap_limits_per_sector_to_cap(monkeypatch):
+    monkeypatch.setenv("ANALYSIS_SECTOR_CAP", "2")
+    assets = [_make_sector_analysis(f"T{i}", "Technology") for i in range(5)]
+    ranked, _errors, _excl = score_and_rank_with_errors(assets, min_rr=3.0, top_n=20)
+
+    accepted = [a for a in ranked if a.rank is not None]
+    excluded = [a for a in ranked if a.rank is None]
+    assert len(accepted) == 2
+    assert len(excluded) == 3
+    assert all(a.rank_exclusion_reason == "sector_cap:Technology" for a in excluded)
+
+
+def test_sector_cap_unknown_bypasses_cap(monkeypatch):
+    monkeypatch.setenv("ANALYSIS_SECTOR_CAP", "2")
+    assets = [_make_sector_analysis(f"U{i}", "unknown") for i in range(5)]
+    ranked, _errors, _excl = score_and_rank_with_errors(assets, min_rr=3.0, top_n=20)
+
+    accepted = [a for a in ranked if a.rank is not None]
+    assert len(accepted) == 5
+
+
+def test_sector_cap_etf_bypasses_cap(monkeypatch):
+    monkeypatch.setenv("ANALYSIS_SECTOR_CAP", "2")
+    assets = [_make_sector_analysis(f"E{i}", "etf") for i in range(3)]
+    ranked, _errors, _excl = score_and_rank_with_errors(assets, min_rr=3.0, top_n=20)
+
+    accepted = [a for a in ranked if a.rank is not None]
+    assert len(accepted) == 3
+
+
+def test_sector_cap_mixed_sectors(monkeypatch):
+    monkeypatch.setenv("ANALYSIS_SECTOR_CAP", "2")
+    assets = (
+        [_make_sector_analysis(f"TECH{i}", "Technology") for i in range(3)]
+        + [_make_sector_analysis(f"FIN{i}", "Financials") for i in range(2)]
+        + [_make_sector_analysis("ENRG0", "Energy")]
+    )
+    ranked, _errors, _excl = score_and_rank_with_errors(assets, min_rr=3.0, top_n=20)
+
+    accepted = [a for a in ranked if a.rank is not None]
+    excluded = [a for a in ranked if a.rank is None]
+    assert len(accepted) == 5  # 2 Tech + 2 Fin + 1 Energy
+    assert len(excluded) == 1  # 1 Tech dropped
+    assert excluded[0].rank_exclusion_reason == "sector_cap:Technology"
+
+
+def test_sector_cap_exclusions_counted_in_result(monkeypatch):
+    monkeypatch.setenv("ANALYSIS_SECTOR_CAP", "2")
+    assets = (
+        [_make_sector_analysis(f"TECH{i}", "Technology") for i in range(5)]
+        + [_make_sector_analysis(f"FIN{i}", "Financials") for i in range(4)]
+    )
+    _ranked, _errors, exclusions = score_and_rank_with_errors(assets, min_rr=3.0, top_n=20)
+
+    assert exclusions == {"Technology": 3, "Financials": 2}
+
+
+def test_sector_cap_respects_score_order(monkeypatch):
+    monkeypatch.setenv("ANALYSIS_SECTOR_CAP", "1")
+    high = _make_sector_analysis("HIGH", "Technology", confidence=0.9, rr_ratio=5.0)
+    low = _make_sector_analysis("LOW", "Technology", confidence=0.5, rr_ratio=3.0)
+    ranked, _errors, _excl = score_and_rank_with_errors([low, high], min_rr=3.0, top_n=20)
+
+    accepted = [a for a in ranked if a.rank is not None]
+    excluded = [a for a in ranked if a.rank is None]
+    assert len(accepted) == 1
+    assert accepted[0].ticker == "HIGH"
+    assert excluded[0].ticker == "LOW"
+
+
+def test_sector_cap_env_clamping(monkeypatch):
+    # cap=0 → clamped to 1
+    monkeypatch.setenv("ANALYSIS_SECTOR_CAP", "0")
+    assets = [_make_sector_analysis(f"T{i}", "Technology") for i in range(3)]
+    ranked, _e, _x = score_and_rank_with_errors(assets, min_rr=3.0, top_n=20)
+    assert len([a for a in ranked if a.rank is not None]) == 1
+
+    # cap=10 → clamped to 5
+    monkeypatch.setenv("ANALYSIS_SECTOR_CAP", "10")
+    assets = [_make_sector_analysis(f"T{i}", "Technology") for i in range(7)]
+    ranked, _e, _x = score_and_rank_with_errors(assets, min_rr=3.0, top_n=20)
+    assert len([a for a in ranked if a.rank is not None]) == 5
+
+
+def test_sector_cap_default_is_2(monkeypatch):
+    monkeypatch.delenv("ANALYSIS_SECTOR_CAP", raising=False)
+    assets = [_make_sector_analysis(f"T{i}", "Technology") for i in range(5)]
+    ranked, _errors, _excl = score_and_rank_with_errors(assets, min_rr=3.0, top_n=20)
+    assert len([a for a in ranked if a.rank is not None]) == 2
+
+
+def test_sector_cap_rank_exclusion_reason_format(monkeypatch):
+    monkeypatch.setenv("ANALYSIS_SECTOR_CAP", "1")
+    assets = [_make_sector_analysis(f"T{i}", "Technology") for i in range(2)]
+    ranked, _errors, _excl = score_and_rank_with_errors(assets, min_rr=3.0, top_n=20)
+
+    excluded = [a for a in ranked if a.rank is None]
+    assert excluded[0].rank_exclusion_reason == "sector_cap:Technology"
+
+
+def test_existing_top_n_still_applied_after_sector_cap(monkeypatch):
+    monkeypatch.setenv("ANALYSIS_SECTOR_CAP", "5")
+    # 6 distinct sectors so the cap never bites; top_n=5 must limit accepted to 5
+    sectors = ["Technology", "Financials", "Energy", "Healthcare", "Industrials", "Materials"]
+    assets = [_make_sector_analysis(f"S{i}", sec) for i, sec in enumerate(sectors)]
+    ranked, _errors, _excl = score_and_rank_with_errors(assets, min_rr=3.0, top_n=5)
+
+    assert len([a for a in ranked if a.rank is not None]) == 5
 

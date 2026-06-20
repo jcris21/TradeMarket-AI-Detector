@@ -111,7 +111,7 @@ async def test_stage_logs_emitted(
     mock_vision.return_value = _ANALYSIS
     mock_hit_rate.return_value = (0.4, "db")
     mock_prior_scores.return_value = {}
-    mock_score_rank.return_value = ([_RANKED], [])
+    mock_score_rank.return_value = ([_RANKED], [], {})
 
     mock_conn = MagicMock()
     mock_conn.close = AsyncMock()

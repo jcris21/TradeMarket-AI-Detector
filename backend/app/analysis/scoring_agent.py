@@ -6,6 +6,9 @@ import aiosqlite
 
 from .models import AssetAnalysis
 
+# Sectors that bypass the per-sector cap (index proxies / unclassified)
+_BYPASS_SECTORS: frozenset[str] = frozenset({"unknown", "etf"})
+
 # ATR viability constants
 _ATR_HARD_FLOOR = 0.5
 _ATR_BOOST_THRESHOLD = 1.5
@@ -16,6 +19,53 @@ _ATR_BOOST_PTS = 8.0
 def _atr_floor_factor() -> float:
     """Return the ATR soft-penalty floor factor from env var, default 0.8."""
     return float(os.environ.get("ANALYSIS_ATR_FLOOR", "0.8"))
+
+
+def _sector_cap() -> int:
+    """Return the per-sector cap from ANALYSIS_SECTOR_CAP (clamped to [1, 5], default 2)."""
+    try:
+        cap = int(os.environ.get("ANALYSIS_SECTOR_CAP", "2"))
+    except ValueError:
+        return 2
+    return max(1, min(5, cap))
+
+
+def _apply_sector_cap(
+    qualifying: list[AssetAnalysis], cap: int
+) -> tuple[list[AssetAnalysis], list[AssetAnalysis], dict[str, int]]:
+    """Greedily enforce a per-sector cap over score-sorted qualifying assets.
+
+    Assumes `qualifying` is already sorted by score_quant descending. Sectors in
+    `_BYPASS_SECTORS` (and empty/None sectors, which map to "unknown") are never capped.
+    Excluded assets get rank=None and rank_exclusion_reason="sector_cap:<sector>".
+
+    Returns (accepted, excluded, exclusion_counts).
+    """
+    accepted: list[AssetAnalysis] = []
+    excluded: list[AssetAnalysis] = []
+    exclusion_counts: dict[str, int] = {}
+    sector_counts: dict[str, int] = {}
+
+    for asset in qualifying:
+        sector = (asset.sector or "unknown").strip()
+        normalized = sector.lower()
+        if normalized in _BYPASS_SECTORS:
+            accepted.append(asset)
+            continue
+        count = sector_counts.get(normalized, 0)
+        if count >= cap:
+            excluded.append(
+                asset.model_copy(update={
+                    "rank": None,
+                    "rank_exclusion_reason": f"sector_cap:{sector}",
+                })
+            )
+            exclusion_counts[sector] = exclusion_counts.get(sector, 0) + 1
+        else:
+            sector_counts[normalized] = count + 1
+            accepted.append(asset)
+
+    return accepted, excluded, exclusion_counts
 
 
 def _compute_atr_viability(asset: AssetAnalysis) -> tuple[bool, bool, float]:
@@ -286,7 +336,7 @@ def score_and_rank(
     Returns all assets (not just Top N) with .rank and .score populated.
     Assets that don't qualify have rank=None.
     """
-    ranked, _errors = score_and_rank_with_errors(
+    ranked, _errors, _exclusions = score_and_rank_with_errors(
         analyses,
         hit_rate=hit_rate,
         hit_rate_source=hit_rate_source,
@@ -304,8 +354,11 @@ def score_and_rank_with_errors(
     prior_scores: dict[str, float] | None = None,
     min_rr: float | None = None,
     top_n: int | None = None,
-) -> tuple[list[AssetAnalysis], list[dict[str, str]]]:
-    """Filter, score, and rank analyses, returning structural validation errors."""
+) -> tuple[list[AssetAnalysis], list[dict[str, str]], dict[str, int]]:
+    """Filter, score, and rank analyses, returning structural validation errors.
+
+    Returns (ranked_all, structural_errors, sector_cap_exclusions).
+    """
     if min_rr is None:
         min_rr = float(os.environ.get("ANALYSIS_MIN_RR_RATIO", "3.0"))
     if top_n is None:
@@ -362,14 +415,17 @@ def score_and_rank_with_errors(
     not_qualifying = [a for a in scored if not qualifies(a)]
 
     qualifying.sort(key=lambda a: a.score_quant or 0, reverse=True)
-    qualifying = qualifying[:top_n]
+
+    accepted, cap_excluded, sector_cap_exclusions = _apply_sector_cap(qualifying, _sector_cap())
+    not_qualifying.extend(cap_excluded)
+    accepted = accepted[:top_n]
 
     ranked: list[AssetAnalysis] = []
-    for i, asset in enumerate(qualifying, start=1):
+    for i, asset in enumerate(accepted, start=1):
         ranked.append(asset.model_copy(update={"rank": i}))
 
     for asset in not_qualifying:
         ranked.append(asset.model_copy(update={"rank": None}))
 
-    return ranked, errors
+    return ranked, errors, sector_cap_exclusions
 

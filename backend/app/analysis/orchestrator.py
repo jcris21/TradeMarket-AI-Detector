@@ -201,7 +201,7 @@ async def run_analysis(tickers: list[str]) -> AnalysisResult:
         prior_scores = await _get_prior_scores(db)
     finally:
         await db.close()
-    ranked, structural_errors = score_and_rank_with_errors(
+    ranked, structural_errors, sector_cap_exclusions = score_and_rank_with_errors(
         analyses,
         hit_rate=hit_rate,
         hit_rate_source=hit_rate_source,
@@ -221,6 +221,7 @@ async def run_analysis(tickers: list[str]) -> AnalysisResult:
         "tickers_total": len(analyses),
         "tickers_ok": len(ranked),
         "tickers_error": len(structural_errors),
+        "sector_cap_exclusions": sector_cap_exclusions,
     })
 
     duration = round(time.monotonic() - start, 2)
@@ -239,4 +240,5 @@ async def run_analysis(tickers: list[str]) -> AnalysisResult:
         errors=errors,
         duration_seconds=duration,
         stale_tickers=stale_tickers,
+        sector_cap_exclusions=sector_cap_exclusions,
     )
