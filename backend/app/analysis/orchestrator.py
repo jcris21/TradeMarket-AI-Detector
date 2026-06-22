@@ -258,7 +258,7 @@ async def run_analysis(
     async def _vision_one(ticker: str) -> AssetAnalysis:
         indicators = successful[ticker]
         screenshot = screenshots.get(ticker)
-        return await analyze_asset(indicators, screenshot)
+        return await analyze_asset(indicators, screenshot_bytes=screenshot)
 
     ticker_list = list(successful.keys())
     vision_tasks = [_vision_one(t) for t in ticker_list]

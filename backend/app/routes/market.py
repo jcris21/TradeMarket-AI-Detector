@@ -3,8 +3,8 @@
 import asyncio
 import logging
 
-import yfinance as yf
 import pandas as pd
+import yfinance as yf
 from fastapi import APIRouter, HTTPException
 
 logger = logging.getLogger(__name__)

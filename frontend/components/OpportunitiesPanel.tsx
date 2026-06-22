@@ -7,6 +7,7 @@ import type { AssetAnalysis, RunStatus } from "@/lib/types";
 import BetSizeCell from "@/components/BetSizeCell";
 import FreshnessBadge from "@/components/FreshnessBadge";
 import PerformanceSummaryPanel from "@/components/PerformanceSummaryPanel";
+import TraderChartUpload from "@/components/TraderChartUpload";
 
 interface OpportunitiesPanelProps {
   onTickerSelect: (ticker: string) => void;
@@ -219,9 +220,11 @@ function ScoreBreakdownBar({ asset }: { asset: AssetAnalysis }) {
 function SignalTable({
   signals,
   onRowClick,
+  onTickerConfirmed,
 }: {
   signals: AssetAnalysis[];
   onRowClick: (asset: AssetAnalysis) => void;
+  onTickerConfirmed: (ticker: string) => Promise<void>;
 }) {
   const [expandedTicker, setExpandedTicker] = useState<string | null>(null);
 
@@ -331,6 +334,12 @@ function SignalTable({
               <tr key={`${asset.ticker}-breakdown`} className="border-b border-border">
                 <td colSpan={11} className="p-0">
                   <ScoreBreakdownBar asset={asset} />
+                  <div className="px-3 pb-2">
+                    <TraderChartUpload
+                      ticker={asset.ticker}
+                      onConfirmed={() => void onTickerConfirmed(asset.ticker)}
+                    />
+                  </div>
                 </td>
               </tr>
             )}
@@ -360,6 +369,7 @@ export default function OpportunitiesPanel({
     loadPreview,
     addTicker,
     getArgument,
+    refreshTicker,
   } = useAnalysis();
   const { performance, isLoading: perfLoading } = usePerformance(status);
   const [newTicker, setNewTicker] = useState("");
@@ -530,7 +540,7 @@ export default function OpportunitiesPanel({
               ✕
             </button>
           </div>
-          <SignalTable signals={previewResults} onRowClick={handleRowClick} />
+          <SignalTable signals={previewResults} onRowClick={handleRowClick} onTickerConfirmed={refreshTicker} />
         </div>
       )}
 
@@ -547,7 +557,7 @@ export default function OpportunitiesPanel({
             No hay señales expiradas en el archivo
           </div>
         ) : (
-          <SignalTable signals={displayedSignals} onRowClick={handleRowClick} />
+          <SignalTable signals={displayedSignals} onRowClick={handleRowClick} onTickerConfirmed={refreshTicker} />
         )}
       </div>
 

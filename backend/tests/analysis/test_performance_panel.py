@@ -1,13 +1,13 @@
 """Tests for get_performance_summary() — phase gate, metrics, and sentinel values."""
 
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
 import aiosqlite
 import pytest
 
-from app.db.repository import get_performance_summary
 from app.db.connection import set_db_path
+from app.db.repository import get_performance_summary
 
 
 @pytest.fixture

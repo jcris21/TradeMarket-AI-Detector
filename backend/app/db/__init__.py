@@ -34,19 +34,33 @@ Public API:
     get_latest_analysis     - Get most recent analysis run results
     get_analysis_by_ticker  - Get latest analysis for a specific ticker
     get_performance_summary - Compute aggregated outcome metrics
+
+    create_enrichment_job              - Insert a new enrichment job row
+    get_enrichment_job                 - Fetch an enrichment job by id
+    update_enrichment_job              - Update status/delta/error on enrichment job
+    set_ticker_preferred_url           - Save preferred_chart_url on analysis_tickers
+    set_analysis_enrichment_status     - Update enrichment_status on analysis_results
+
+    store_custom_levels                - Persist confirmed S/R levels with TTL
+    load_active_custom_levels          - Fetch non-expired custom levels for a ticker
+    expire_stale_levels                - NULL out expired custom_levels rows
+    update_analysis_result_custom_levels - Update custom_levels_applied + enrichment_delta
 """
 
 from .connection import get_connection, init_db, set_db_path
 from .repository import (
     add_analysis_ticker,
     add_to_watchlist,
+    create_enrichment_job,
     delete_position,
+    expire_stale_levels,
     get_analysis_by_ticker,
     get_analysis_tickers,
     get_cash_balance,
-    get_performance_summary,
     get_chat_history,
+    get_enrichment_job,
     get_latest_analysis,
+    get_performance_summary,
     get_portfolio_history,
     get_position,
     get_positions,
@@ -54,11 +68,17 @@ from .repository import (
     insert_chat_message,
     insert_snapshot,
     insert_trade,
+    load_active_custom_levels,
     remove_analysis_ticker,
     remove_from_watchlist,
     save_analysis_results,
+    set_analysis_enrichment_status,
+    set_ticker_preferred_url,
+    store_custom_levels,
+    update_analysis_result_custom_levels,
     update_cash_balance,
     update_enrichment_delta,
+    update_enrichment_job,
     update_outcome_atomic,
     upsert_position,
 )
@@ -91,6 +111,15 @@ __all__ = [
     "update_outcome_atomic",
     "update_enrichment_delta",
     "get_performance_summary",
+    "create_enrichment_job",
+    "get_enrichment_job",
+    "update_enrichment_job",
+    "set_ticker_preferred_url",
+    "set_analysis_enrichment_status",
+    "store_custom_levels",
+    "load_active_custom_levels",
+    "expire_stale_levels",
+    "update_analysis_result_custom_levels",
     "DEFAULT_USER_ID",
     "DEFAULT_TICKERS",
     "DEFAULT_CASH_BALANCE",

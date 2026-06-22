@@ -650,3 +650,189 @@ async def get_analysis_by_ticker(
     finally:
         await db.close()
 
+
+# --- Enrichment Jobs ---
+
+
+async def create_enrichment_job(
+    ticker: str,
+    enrichment_type: str,
+    source_url: str | None = None,
+    status: str = "pending",
+    extracted_levels: str | None = None,
+) -> str:
+    """Insert a new enrichment job row. Returns the UUID id."""
+    job_id = _uuid()
+    created_at = _now()
+    db = await get_connection()
+    try:
+        await db.execute(
+            "INSERT INTO enrichments "
+            "(id, ticker, enrichment_type, source_url, status, created_at, extracted_levels) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (job_id, ticker.upper(), enrichment_type, source_url, status, created_at, extracted_levels),
+        )
+        await db.commit()
+        return job_id
+    finally:
+        await db.close()
+
+
+async def get_enrichment_job(enrichment_id: str) -> dict | None:
+    """Return the enrichment job row as a dict, or None if not found."""
+    db = await get_connection()
+    try:
+        cursor = await db.execute(
+            "SELECT * FROM enrichments WHERE id = ?", (enrichment_id,)
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+    finally:
+        await db.close()
+
+
+async def update_enrichment_job(
+    enrichment_id: str,
+    status: str,
+    enrichment_delta: float | None = None,
+    error_message: str | None = None,
+    completed_at: str | None = None,
+) -> None:
+    """Update status (and optionally delta/error/completed_at) on an enrichment job."""
+    db = await get_connection()
+    try:
+        await db.execute(
+            "UPDATE enrichments SET status = ?, enrichment_delta = ?, "
+            "error_message = ?, completed_at = ? WHERE id = ?",
+            (status, enrichment_delta, error_message, completed_at, enrichment_id),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+async def set_ticker_preferred_url(ticker: str, url: str) -> None:
+    """Save source_url as preferred_chart_url for a ticker in analysis_tickers."""
+    db = await get_connection()
+    try:
+        await db.execute(
+            "UPDATE analysis_tickers SET preferred_chart_url = ? WHERE ticker = ?",
+            (url, ticker.upper()),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+async def store_custom_levels(
+    ticker: str, levels: list, expires_at: str
+) -> None:
+    """Persist confirmed S/R levels with TTL in analysis_tickers.custom_levels."""
+    levels_json = json.dumps([{"type": lv.type, "price": lv.price} for lv in levels])
+    db = await get_connection()
+    try:
+        await db.execute(
+            "UPDATE analysis_tickers SET custom_levels = ?, custom_levels_expires_at = ? "
+            "WHERE ticker = ?",
+            (levels_json, expires_at, ticker.upper()),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+async def load_active_custom_levels(ticker: str) -> list:
+    """Return confirmed levels for a ticker if not expired; else []."""
+    from app.analysis.models import ConfirmedLevel
+
+    now = _now()
+    db = await get_connection()
+    try:
+        cursor = await db.execute(
+            "SELECT custom_levels, custom_levels_expires_at FROM analysis_tickers "
+            "WHERE ticker = ?",
+            (ticker.upper(),),
+        )
+        row = await cursor.fetchone()
+        if not row:
+            return []
+        raw = row["custom_levels"]
+        expires = row["custom_levels_expires_at"]
+        if not raw or not expires or expires < now:
+            return []
+        items = json.loads(raw)
+        return [ConfirmedLevel(type=i["type"], price=i["price"]) for i in items]
+    finally:
+        await db.close()
+
+
+async def expire_stale_levels() -> None:
+    """NULL custom_levels and expires_at for all tickers past their TTL."""
+    now = _now()
+    db = await get_connection()
+    try:
+        await db.execute(
+            "UPDATE analysis_tickers "
+            "SET custom_levels = NULL, custom_levels_expires_at = NULL "
+            "WHERE custom_levels_expires_at IS NOT NULL AND custom_levels_expires_at < ?",
+            (now,),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+async def update_analysis_result_custom_levels(
+    ticker: str,
+    custom_levels_applied: int,
+    enrichment_delta: float,
+    user_id: str = DEFAULT_USER_ID,
+) -> bool:
+    """Update custom_levels_applied and enrichment_delta on the latest analysis row."""
+    db = await get_connection()
+    try:
+        cursor = await db.execute(
+            "UPDATE analysis_results SET custom_levels_applied = ?, enrichment_delta = ? "
+            "WHERE user_id = ? AND ticker = ? AND id = ("
+            "  SELECT id FROM analysis_results WHERE user_id = ? AND ticker = ? "
+            "  ORDER BY analyzed_at DESC LIMIT 1"
+            ")",
+            (custom_levels_applied, enrichment_delta, user_id, ticker.upper(), user_id, ticker.upper()),
+        )
+        await db.commit()
+        return cursor.rowcount > 0
+    finally:
+        await db.close()
+
+
+async def set_analysis_enrichment_status(
+    ticker: str,
+    status: str,
+    enrichment_delta: float | None = None,
+    user_id: str = DEFAULT_USER_ID,
+) -> None:
+    """Update enrichment_status and optionally enrichment_delta on the latest analysis row."""
+    db = await get_connection()
+    try:
+        if enrichment_delta is not None:
+            await db.execute(
+                "UPDATE analysis_results SET enrichment_status = ?, enrichment_delta = ? "
+                "WHERE user_id = ? AND ticker = ? AND id = ("
+                "  SELECT id FROM analysis_results WHERE user_id = ? AND ticker = ? "
+                "  ORDER BY analyzed_at DESC LIMIT 1"
+                ")",
+                (status, enrichment_delta, user_id, ticker.upper(), user_id, ticker.upper()),
+            )
+        else:
+            await db.execute(
+                "UPDATE analysis_results SET enrichment_status = ? "
+                "WHERE user_id = ? AND ticker = ? AND id = ("
+                "  SELECT id FROM analysis_results WHERE user_id = ? AND ticker = ? "
+                "  ORDER BY analyzed_at DESC LIMIT 1"
+                ")",
+                (status, user_id, ticker.upper(), user_id, ticker.upper()),
+            )
+        await db.commit()
+    finally:
+        await db.close()
+

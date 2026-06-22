@@ -1,13 +1,12 @@
 """Tests for orchestrator 70% minimum viable run threshold and save_analysis_run gating."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi import HTTPException
 
 from app.analysis.models import AssetAnalysis, DataFetchError, TechnicalIndicators
 from app.analysis.orchestrator import run_analysis
-
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 

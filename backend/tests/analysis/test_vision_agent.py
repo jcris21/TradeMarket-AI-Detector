@@ -1,8 +1,7 @@
 """Tests for VisionAgent — LLM vision analysis."""
 
-import base64
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -38,17 +37,13 @@ _VALID_LLM_JSON = json.dumps({
 _MOCK_PNG = b"\x89PNG\r\n"
 
 
-def _make_mock_completion(json_content: str):
-    mock_choice = MagicMock()
-    mock_choice.message.content = json_content
-    mock_resp = MagicMock()
-    mock_resp.choices = [mock_choice]
-    return mock_resp
+def _make_call_llm_mock(json_content: str) -> AsyncMock:
+    return AsyncMock(return_value=json_content)
 
 
-@patch("app.analysis.vision_agent.completion")
-async def test_analyze_asset_returns_asset_analysis(mock_completion):
-    mock_completion.return_value = _make_mock_completion(_VALID_LLM_JSON)
+@patch("app.analysis.vision_agent._call_llm")
+async def test_analyze_asset_returns_asset_analysis(mock_call_llm):
+    mock_call_llm.return_value = _VALID_LLM_JSON
     result = await analyze_asset(_INDICATORS, _MOCK_PNG)
     assert isinstance(result, AssetAnalysis)
     assert result.ticker == "NVDA"
@@ -56,26 +51,43 @@ async def test_analyze_asset_returns_asset_analysis(mock_completion):
     assert result.confidence == pytest.approx(0.85)
 
 
-@patch("app.analysis.vision_agent.completion")
-async def test_analyze_asset_without_screenshot_still_returns_result(mock_completion):
-    mock_completion.return_value = _make_mock_completion(_VALID_LLM_JSON)
+@patch("app.analysis.vision_agent._call_llm")
+async def test_analyze_asset_without_screenshot_still_returns_result(mock_call_llm):
+    mock_call_llm.return_value = _VALID_LLM_JSON
     result = await analyze_asset(_INDICATORS, None)
     assert isinstance(result, AssetAnalysis)
     assert result.support_validated is False  # forced False when no screenshot
 
 
-@patch("app.analysis.vision_agent.completion")
-async def test_malformed_llm_response_returns_avoid(mock_completion):
-    mock_completion.return_value = _make_mock_completion("not valid json {{{{")
+@patch("app.analysis.vision_agent._call_llm")
+async def test_malformed_llm_response_returns_avoid(mock_call_llm):
+    mock_call_llm.return_value = "not valid json {{{{"
     result = await analyze_asset(_INDICATORS, _MOCK_PNG)
     assert result.signal == "AVOID"
     assert result.confidence == 0.0
     assert "unavailable" in result.argument.lower()
 
 
-@patch("app.analysis.vision_agent.completion")
-async def test_llm_exception_returns_avoid(mock_completion):
-    mock_completion.side_effect = Exception("OpenRouter timeout")
+@patch("app.analysis.vision_agent._call_llm")
+async def test_llm_exception_returns_avoid(mock_call_llm):
+    mock_call_llm.side_effect = Exception("OpenRouter timeout")
     result = await analyze_asset(_INDICATORS, _MOCK_PNG)
     assert result.signal == "AVOID"
     assert result.confidence == 0.0
+
+
+@patch("app.analysis.vision_agent._call_llm")
+async def test_screenshot_bytes_parameter_accepted(mock_call_llm):
+    """screenshot_bytes kwarg takes priority; the call succeeds."""
+    mock_call_llm.return_value = _VALID_LLM_JSON
+    result = await analyze_asset(_INDICATORS, screenshot_bytes=_MOCK_PNG)
+    assert isinstance(result, AssetAnalysis)
+    assert result.ticker == "NVDA"
+
+
+@patch("app.analysis.vision_agent._call_llm")
+async def test_text_only_fallback_when_no_screenshot(mock_call_llm):
+    """Without screenshot_bytes, falls back to text-only (support_validated forced False)."""
+    mock_call_llm.return_value = _VALID_LLM_JSON
+    result = await analyze_asset(_INDICATORS, screenshot_bytes=None)
+    assert result.support_validated is False

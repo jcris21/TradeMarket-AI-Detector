@@ -10,6 +10,7 @@ import {
   RunInProgressError,
   startAnalysisRun,
 } from "./api";
+
 import type { AssetAnalysis, RunStatus } from "./types";
 
 type AnalysisStatus = "idle" | "running" | "done" | "error";
@@ -30,6 +31,7 @@ interface UseAnalysisReturn {
   loadPreview: () => Promise<void>;
   addTicker: (ticker: string) => Promise<void>;
   getArgument: (ticker: string) => Promise<string | null>;
+  refreshTicker: (ticker: string) => Promise<void>;
 }
 
 export function useAnalysis(): UseAnalysisReturn {
@@ -146,6 +148,17 @@ export function useAnalysis(): UseAnalysisReturn {
     }
   }, []);
 
+  const refreshTicker = useCallback(async (ticker: string): Promise<void> => {
+    try {
+      const updated = await getTickerAnalysis(ticker);
+      setResults((prev) =>
+        prev.map((r) => (r.ticker === ticker ? updated : r))
+      );
+    } catch {
+      // Silently ignore — stale data is acceptable
+    }
+  }, []);
+
   return {
     results,
     top5,
@@ -160,5 +173,6 @@ export function useAnalysis(): UseAnalysisReturn {
     loadPreview,
     addTicker,
     getArgument,
+    refreshTicker,
   };
 }

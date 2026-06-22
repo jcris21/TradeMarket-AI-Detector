@@ -153,6 +153,9 @@ class OutcomeDetector:
 
     async def run(self) -> PerformanceSummary:
         """Process all unresolved signals and return a PerformanceSummary."""
+        from app.db.repository import expire_stale_levels
+        await expire_stale_levels()
+
         signals = await self._get_unresolved_signals()
         logger.info("OutcomeDetector: %d unresolved signals to process", len(signals))
 

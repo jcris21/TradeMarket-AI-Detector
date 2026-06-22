@@ -112,9 +112,9 @@ def _pick_nearest(levels: list[float], price: float, above: bool, n: int = 2) ->
     """Select the n closest clustered levels above or below price."""
     gap = price * 0.003  # ignore levels within 0.3% of current price
     if above:
-        candidates = sorted(l for l in levels if l > price + gap)
+        candidates = sorted(lvl for lvl in levels if lvl > price + gap)
     else:
-        candidates = sorted((l for l in levels if l < price - gap), reverse=True)
+        candidates = sorted((lvl for lvl in levels if lvl < price - gap), reverse=True)
     return candidates[:n]
 
 
@@ -220,8 +220,8 @@ def _compute_indicators(ticker: str, df: pd.DataFrame) -> TechnicalIndicators:
     swing_sup, swing_res = _swing_levels(high, low, n=5)
     vp_levels = _volume_profile_levels(close, volume, n_bins=30, top_n=6)
 
-    all_supports = _cluster_levels(sorted(swing_sup + [l for l in vp_levels if l < current_price]))
-    all_resistances = _cluster_levels(sorted(swing_res + [l for l in vp_levels if l > current_price]))
+    all_supports = _cluster_levels(sorted(swing_sup + [lvl for lvl in vp_levels if lvl < current_price]))
+    all_resistances = _cluster_levels(sorted(swing_res + [lvl for lvl in vp_levels if lvl > current_price]))
 
     nearest_sup = _pick_nearest(all_supports, current_price, above=False, n=2)
     nearest_res = _pick_nearest(all_resistances, current_price, above=True, n=2)
@@ -304,7 +304,6 @@ async def fetch_indicators_batch(tickers: list[str]) -> dict[str, TechnicalIndic
         rate_limited = True
         batch_df = pd.DataFrame()
 
-    t_batch_done = _time.monotonic()
     for ticker in tickers:
         t_start = _time.monotonic()
         if rate_limited:

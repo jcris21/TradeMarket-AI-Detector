@@ -17,7 +17,6 @@ from app.db import init_db, set_db_path
 from app.db.connection import get_connection
 from app.db.repository import get_performance_summary, update_outcome_atomic
 
-
 # ── Minimal test app (mirrors routes/analysis.py performance endpoint) ────────
 
 _test_app = FastAPI()
@@ -111,18 +110,21 @@ class TestPerformanceEndpoint:
         assert "Calibration" in data["phase_banner"]
 
     async def test_hit_ratio_correct_with_mixed_outcomes(self, client):
-        await _insert_signal("TARGET_HIT", gain_pct=5.0, loss_pct=2.0)
-        await _insert_signal("TARGET_HIT", gain_pct=5.0, loss_pct=2.0)
-        await _insert_signal("STOP_HIT", gain_pct=2.0, loss_pct=5.0)
+        # Phase gate requires 30+ conclusive signals (TARGET_HIT + STOP_HIT).
+        # Use 20 TARGET + 10 STOP = 30 conclusive → Phase 1, hit_ratio = 2/3.
+        for _ in range(20):
+            await _insert_signal("TARGET_HIT", gain_pct=5.0, loss_pct=2.0)
+        for _ in range(10):
+            await _insert_signal("STOP_HIT", gain_pct=2.0, loss_pct=5.0)
         await _insert_signal("EXPIRED", gain_pct=0.5, loss_pct=0.5)
 
         resp = await client.get("/api/analysis/performance")
         data = resp.json()
 
-        assert data["target_hits"] == 2
-        assert data["stop_hits"] == 1
+        assert data["target_hits"] == 20
+        assert data["stop_hits"] == 10
         assert data["expired"] == 1
-        assert abs(data["hit_ratio"] - 2 / 3) < 1e-4  # 2 / (2 + 1), rounded to 4 dp
+        assert abs(data["hit_ratio"] - 2 / 3) < 1e-4  # 20 / (20 + 10) = 2/3
 
     async def test_profit_factor_null_when_no_losses(self, client):
         """All TARGET_HIT (no STOP_HIT) → profit_factor serialized as null in JSON."""

@@ -1,6 +1,6 @@
 """Tests for DataAgent — yfinance fetch + pandas-ta indicators."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pandas as pd
 import pytest
@@ -80,10 +80,6 @@ async def test_atr_computed_when_available(mock_download, mock_ta):
     mock_download.return_value = df
 
     # Mock MACD, RSI, SMA so _compute_indicators doesn't fail on them
-    macd_df = pd.DataFrame(
-        {"MACD_12_26_9": [0.5], "MACDs_12_26_9": [0.3], "MACDh_12_26_9": [0.2]},
-        index=df.index[-1:],
-    )
     # Pad MACD df to length of df for iloc[-2]
     macd_full = pd.DataFrame(
         {
@@ -148,7 +144,8 @@ def test_data_fetch_error_reason_field():
 @patch("app.analysis.data_agent.yf.download")
 def test_rate_limit_retry_succeeds_on_second_attempt(mock_download, mock_sleep):
     """_download_with_retry returns the DataFrame when 429 occurs once then succeeds."""
-    from app.analysis.data_agent import _download_with_retry, YFRateLimitError as _YFRateLimitError
+    from app.analysis.data_agent import YFRateLimitError as _YFRateLimitError
+    from app.analysis.data_agent import _download_with_retry
 
     valid_df = _make_ohlcv(60)
     mock_download.side_effect = [_YFRateLimitError(), valid_df]
@@ -164,7 +161,8 @@ def test_rate_limit_retry_succeeds_on_second_attempt(mock_download, mock_sleep):
 @patch("app.analysis.data_agent.yf.download")
 def test_rate_limit_all_retries_exhausted(mock_download, mock_sleep):
     """_download_with_retry re-raises after exactly 3 calls; total sleep = 6s."""
-    from app.analysis.data_agent import _download_with_retry, YFRateLimitError as _YFRateLimitError
+    from app.analysis.data_agent import YFRateLimitError as _YFRateLimitError
+    from app.analysis.data_agent import _download_with_retry
 
     mock_download.side_effect = _YFRateLimitError()
 
@@ -179,7 +177,7 @@ def test_rate_limit_all_retries_exhausted(mock_download, mock_sleep):
 
 def test_staleness_fallback_ignores_expired_cache():
     """Rate-limited ticker with >24h cache should be rejected by the staleness fallback."""
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime, timedelta, timezone
 
     old_time = (datetime.now(timezone.utc) - timedelta(hours=25)).isoformat()
     cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
@@ -189,7 +187,7 @@ def test_staleness_fallback_ignores_expired_cache():
 
 def test_staleness_fallback_accepts_fresh_cache():
     """Rate-limited ticker with <24h cache should pass the staleness fallback check."""
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime, timedelta, timezone
 
     recent_time = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
     cutoff = datetime.now(timezone.utc) - timedelta(hours=24)

@@ -85,7 +85,8 @@ CREATE TABLE IF NOT EXISTS analysis_results (
     score_quant REAL,
     score_legacy REAL,
     enrichment_delta REAL,
-    rank_exclusion_reason TEXT
+    rank_exclusion_reason TEXT,
+    enrichment_status TEXT DEFAULT 'none'
 );
 
 CREATE TABLE IF NOT EXISTS analysis_tickers (
@@ -96,7 +97,21 @@ CREATE TABLE IF NOT EXISTS analysis_tickers (
     sector TEXT,
     sub_sector TEXT,
     seed_version TEXT,
+    preferred_chart_url TEXT,
     UNIQUE(user_id, ticker)
+);
+
+CREATE TABLE IF NOT EXISTS enrichments (
+    id TEXT PRIMARY KEY,
+    ticker TEXT NOT NULL,
+    run_id TEXT,
+    enrichment_type TEXT NOT NULL,
+    source_url TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    error_message TEXT,
+    enrichment_delta REAL,
+    created_at TEXT NOT NULL,
+    completed_at TEXT
 );
 """
 

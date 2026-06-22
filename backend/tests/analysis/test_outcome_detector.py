@@ -2,22 +2,18 @@
 
 import math
 import uuid
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
-import pytest
-
+from app.analysis.outcome_detector import (
+    OUTCOME_EXPIRED,
+    OUTCOME_STOP_HIT,
+    OUTCOME_TARGET_HIT,
+    OutcomeDetector,
+    _determine_outcome,
+)
 from app.db import connection as conn_module
 from app.db.connection import get_connection
 from app.db.repository import update_outcome_atomic
-from app.analysis.outcome_detector import (
-    OutcomeDetector,
-    PerformanceSummary,
-    OUTCOME_TARGET_HIT,
-    OUTCOME_STOP_HIT,
-    OUTCOME_EXPIRED,
-    _determine_outcome,
-)
-
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -235,7 +231,7 @@ async def test_concurrency_one_writes_other_skips(tmp_path):
 async def test_nan_guard_skips_update_and_logs_warning(tmp_path, caplog):
     """When gain_pct is NaN, update_outcome_atomic is NOT called and a WARNING is logged."""
     await _setup_db(tmp_path)
-    sid = await _insert_signal()
+    await _insert_signal()
 
     import logging
 

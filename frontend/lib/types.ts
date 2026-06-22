@@ -164,6 +164,28 @@ export interface AnalysisPartialResponse {
   partial: boolean;
 }
 
+/** Extracted support/resistance level from trader chart upload */
+export interface ExtractedLevel {
+  type: "support" | "resistance";
+  price: number;
+  confidence: number;
+}
+
+/** Response from POST /api/analysis/enrich/{ticker} with enrichment_type: trader_chart */
+export interface TraderChartEnrichResponse {
+  enrichment_id: string;
+  extracted_levels: ExtractedLevel[];
+  status: string;
+}
+
+/** Response from POST /api/analysis/enrich/{ticker}/confirm */
+export interface LevelConfirmResult {
+  custom_levels_applied: number;
+  enrichment_delta: number;
+  score_quant: number;
+  score_enriched: number;
+}
+
 /** Performance summary from GET /api/analysis/performance */
 export interface PerformanceSummary {
   phase_gate_active: boolean;

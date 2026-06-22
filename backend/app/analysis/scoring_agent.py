@@ -1,13 +1,16 @@
 """ScoringAgent — filter, score, and rank asset analyses."""
 
 import os
+from typing import List
 
 import aiosqlite
 
-from .models import AssetAnalysis
+from .models import AssetAnalysis, ConfirmedLevel
 
 # Sectors that bypass the per-sector cap (index proxies / unclassified)
 _BYPASS_SECTORS: frozenset[str] = frozenset({"unknown", "etf"})
+
+ENRICHMENT_MAX_DELTA = float(os.environ.get("ENRICHMENT_MAX_DELTA", "15.0"))
 
 # ATR viability constants
 _ATR_HARD_FLOOR = 0.5
@@ -321,6 +324,38 @@ async def _get_hit_rate(db: aiosqlite.Connection) -> tuple[float, str]:
     except aiosqlite.OperationalError:
         pass
     return 0.35, "assumed"
+
+
+def _apply_custom_levels(
+    entry_price: float,
+    target_price: float,
+    atr_14: float,
+    confirmed_levels: List[ConfirmedLevel],
+) -> tuple[float, int]:
+    """Compute enrichment_delta from trader-confirmed S/R levels.
+
+    Scoring rules (max 2 levels evaluated):
+      +4 pts for support within 1 ATR of entry_price
+      +3 pts for resistance within 2% of target_price
+    Result is clamped to [0, ENRICHMENT_MAX_DELTA].
+
+    Returns (enrichment_delta, applied_count).
+    """
+    delta = 0.0
+    applied = 0
+
+    for level in confirmed_levels[:2]:
+        if level.type == "support":
+            if abs(level.price - entry_price) <= atr_14:
+                delta += 4.0
+                applied += 1
+        elif level.type == "resistance":
+            if target_price > 0 and abs(level.price - target_price) / target_price <= 0.02:
+                delta += 3.0
+                applied += 1
+
+    delta = round(max(0.0, min(ENRICHMENT_MAX_DELTA, delta)), 2)
+    return delta, applied
 
 
 def score_and_rank(

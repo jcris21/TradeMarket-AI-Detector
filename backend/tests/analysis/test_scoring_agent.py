@@ -1,12 +1,11 @@
 """Tests for ScoringAgent — filter, score, and rank assets."""
 
-import pytest
 import aiosqlite
+import pytest
 
 from app.analysis.models import AssetAnalysis
 from app.analysis.scoring_agent import (
     _compute_bet_size,
-    _compute_score_legacy,
     _compute_score_quant,
     _get_hit_rate,
     _get_prior_scores,

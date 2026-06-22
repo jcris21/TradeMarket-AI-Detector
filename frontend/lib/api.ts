@@ -12,6 +12,8 @@ import type {
   RunStatus,
   AssetAnalysis,
   PerformanceSummary,
+  TraderChartEnrichResponse,
+  LevelConfirmResult,
 } from "./types";
 
 const BASE = "/api";
@@ -183,4 +185,25 @@ export async function removeAnalysisTicker(ticker: string): Promise<void> {
 
 export async function getPerformanceSummary(): Promise<PerformanceSummary> {
   return request<PerformanceSummary>("/analysis/performance");
+}
+
+export async function enrichTraderChart(
+  ticker: string,
+  chartImageB64: string
+): Promise<TraderChartEnrichResponse> {
+  return request<TraderChartEnrichResponse>(`/analysis/${ticker}/enrich`, {
+    method: "POST",
+    body: JSON.stringify({ enrichment_type: "trader_chart", chart_image: chartImageB64 }),
+  });
+}
+
+export async function confirmLevels(
+  ticker: string,
+  enrichmentId: string,
+  confirmedIndices: number[]
+): Promise<LevelConfirmResult> {
+  return request<LevelConfirmResult>(`/analysis/${ticker}/enrich/confirm`, {
+    method: "POST",
+    body: JSON.stringify({ enrichment_id: enrichmentId, confirmed_indices: confirmedIndices }),
+  });
 }

@@ -112,3 +112,145 @@
   - US-203 second: escalates rank_exclusion_reason to persisted + DB column; picks up US-202's 3-tuple return
   - US-204 last: rewrites the run endpoint; picks up all response fields from US-202 and US-203 before finalizing the 202
   handler
+
+────────────────────────────────────────────────────────────────────────────────
+  Overlap & Conflict Map — Cycle 3: US-201 × US-302
+  (us-201-screenshot-agent / us-302-trader-chart-upload)
+────────────────────────────────────────────────────────────────────────────────
+
+  Dependency declaration (explicit in both proposals)
+  ─────────────────────────────────────────────────
+  US-302 is a HARD downstream consumer of US-201. Three shared foundations:
+    1. `enrichments` table — created by US-201, consumed by US-302 to store
+       trader_chart jobs with status="pending_confirmation"
+    2. `EnrichRequest` union type — created by US-201 (discriminated on
+       enrichment_type), extended by US-302 to add TraderChartEnrichRequest
+    3. Enrich endpoint dispatch — US-201 restructures POST /api/analysis/enrich/
+       {ticker} from sync to async dispatch; US-302 adds its branch into that
+       same dispatch structure
+
+  If US-302 is started in a parallel worktree without US-201 merged first, all
+  three foundations are missing and US-302 cannot compile cleanly.
+
+  Files touched by multiple changes
+  ──────────────────────────────────
+
+  File: backend/app/analysis/models.py
+  US-201: adds EnrichmentType literal, ScreenshotEnrichRequest, EnrichmentJobResponse,
+          EnrichRequest discriminated union (enrichment_type dispatcher)
+  US-302: adds ExtractedLevel, TraderChartEnrichRequest, LevelConfirmationRequest,
+          ConfirmedLevel, TraderChartEnrichResponse; extends EnrichRequest union with
+          TraderChartEnrichRequest
+  Conflict risk: HIGH — US-302 must extend the EnrichRequest union created by US-201.
+    In parallel worktrees the union definition diverges: US-201's worktree has
+    Union[ScreenshotEnrichRequest], US-302's worktree extends it to
+    Union[ScreenshotEnrichRequest, TraderChartEnrichRequest]. Merge produces a
+    duplicate/conflicting union definition. US-201 must merge first.
+  ────────────────────────────────────────
+  File: backend/app/routes/analysis.py
+  US-201: Major structural rewrite — adds enrichment_type dispatch block, screenshot
+          branch (202 async), URL validation helper, BackgroundTasks wiring;
+          also adds _run_screenshot_enrichment() background task function
+  US-302: Adds trader_chart branch inside the same dispatch block; adds new
+          POST /api/analysis/enrich/{ticker}/confirm endpoint
+  Conflict risk: HIGH — both stories refactor the same route file's enrich handler.
+    US-302's trader_chart branch is syntactically inserted inside the dispatch block
+    US-201 creates. In parallel worktrees this file diverges structurally; merging
+    requires manual reconciliation of the dispatch block and import list.
+    US-201 must merge first; US-302 applies its branch to the already-restructured
+    handler.
+  ────────────────────────────────────────
+  File: backend/app/db/schema.py
+  US-201: CREATE TABLE enrichments (...); ALTER TABLE analysis_tickers ADD COLUMN
+          preferred_chart_url TEXT; ALTER TABLE analysis_results ADD COLUMN
+          enrichment_status TEXT DEFAULT 'none'
+  US-302: ALTER TABLE analysis_tickers ADD COLUMN custom_levels TEXT;
+          ALTER TABLE analysis_tickers ADD COLUMN custom_levels_expires_at TEXT;
+          ALTER TABLE analysis_results ADD COLUMN custom_levels_applied INTEGER DEFAULT 0
+  Conflict risk: MEDIUM — different columns, different tables sections, but startup
+    migration blocks are typically grouped; merge conflict possible if both add ALTER
+    statements in adjacent lines of the same migration function. The enrichments DDL
+    (US-201) and the analysis_tickers/analysis_results ALTERs (US-302) are additive;
+    ordering within migration is not significant as long as enrichments table creation
+    lands before US-302's job writes.
+  ────────────────────────────────────────
+  File: backend/app/analysis/vision_agent.py
+  US-201: adds screenshot_bytes: bytes | None = None parameter to VisionAgent.analyze();
+          implements priority logic (screenshot_bytes > disk_path > text-only)
+  US-302: adds LEVEL_EXTRACTION_PROMPT constant; adds async extract_levels(image_bytes:
+          bytes) -> List[ExtractedLevel] method; adds 8-second timeout guard
+  Conflict risk: LOW — US-201 modifies the existing analyze() signature; US-302 adds a
+    brand-new method. No line-level conflict as long as both are applied cleanly to the
+    same base. If in parallel worktrees, the analyze() signature in US-201's worktree
+    diverges from base; US-302's worktree adds extract_levels() to base without the
+    screenshot_bytes param. Merge is straightforward (different methods/lines) but
+    must be reviewed manually to confirm the priority logic from US-201 is preserved.
+  ────────────────────────────────────────
+  File: backend/app/db/repository.py
+  US-201: adds create_enrichment_job(), get_enrichment_job(), update_enrichment_job(),
+          set_ticker_preferred_url(), set_analysis_enrichment_status() (5 functions)
+  US-302: adds store_custom_levels(), load_active_custom_levels(), expire_stale_levels()
+          (3 functions); also calls create_enrichment_job() (US-201's function) in its
+          route handler
+  Conflict risk: LOW — all additive, entirely different function names, no overlap in
+    implementation. US-302 has a runtime call dependency on create_enrichment_job()
+    existing at merge time.
+  ────────────────────────────────────────
+  File: backend/app/analysis/scoring_agent.py
+  US-201: no changes
+  US-302: adds _apply_custom_levels(entry_price, target_price, atr_14,
+          confirmed_levels) -> tuple[float, int]
+  Conflict risk: Low (single owner)
+  ────────────────────────────────────────
+  File: backend/app/main.py
+  US-201: no startup wiring required
+  US-302: wires expire_stale_levels() into application startup
+  Conflict risk: Low (single owner for this change)
+  ────────────────────────────────────────
+  File: pyproject.toml / Dockerfile
+  US-201: adds playwright dependency; adds playwright install chromium --with-deps
+          layer in Dockerfile
+  US-302: no new dependencies
+  Conflict risk: Low (single owner)
+  ────────────────────────────────────────
+  Semantic conflict: analysis_results.enrichment_delta column
+  US-201: background task writes enrichment_delta after VisionAgent screenshot analysis
+          (confidence-mapped float)
+  US-302: confirm endpoint writes enrichment_delta after discrete scoring rules
+          (+4/+3 integer points)
+  Conflict risk: MEDIUM (semantic, not merge) — both types write to the same column;
+    last-write-wins at DB level. The design accepts this (single-user, single active
+    enrichment type assumed). However, if a trader runs a screenshot enrichment then
+    immediately confirms a trader_chart, the second write overwrites the first without
+    warning. Needs explicit documentation in whichever story merges second.
+
+  Recommended worktree isolation strategy
+
+  ┌────────────┬────────────────────────────────────┬────────────────────────────────────────────────────────────────────┐
+  │  Worktree  │              Change                │                       Safe to run alone?                           │
+  ├────────────┼────────────────────────────────────┼────────────────────────────────────────────────────────────────────┤
+  │ wt/us-201  │ us-201-screenshot-agent            │ Yes — self-contained; introduces all shared foundations            │
+  │            │                                    │ (enrichments table, EnrichRequest union, dispatch structure,        │
+  │            │                                    │ Playwright dep). No upstream dependencies.                          │
+  ├────────────┼────────────────────────────────────┼────────────────────────────────────────────────────────────────────┤
+  │ wt/us-302  │ us-302-trader-chart-upload         │ NO — cannot safely run in isolation. Hard dependency on            │
+  │            │                                    │ enrichments table, EnrichRequest union, and enrich endpoint         │
+  │            │                                    │ dispatch from US-201. Must be built on top of merged US-201         │
+  │            │                                    │ branch, not on main directly.                                       │
+  └────────────┴────────────────────────────────────┴────────────────────────────────────────────────────────────────────┘
+
+  Critical merge order
+
+  US-201 → US-302  (strict sequential — not parallelizable)
+
+  - US-201 first: creates enrichments table; builds EnrichRequest discriminated union;
+    restructures enrich endpoint into dispatch; adds ScreenshotAgent + Playwright;
+    adds VisionAgent.analyze() screenshot_bytes parameter
+  - US-302 second (branch off merged US-201): adds TraderChartEnrichRequest to the
+    existing union; adds trader_chart branch to existing dispatch; adds /confirm
+    endpoint; adds VisionAgent.extract_levels(); adds ScoringAgent._apply_custom_levels();
+    adds custom_levels columns; wires TTL expiry into startup
+
+  There is no safe parallel execution path for this pair. The coupling is too deep:
+  three shared extension points (union type, dispatch block, enrichments table) all
+  require US-201's artifacts to exist before US-302 can compile or test cleanly.

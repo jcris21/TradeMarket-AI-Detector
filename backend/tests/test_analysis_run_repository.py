@@ -14,7 +14,6 @@ import pytest
 
 from app.db.schema import SCHEMA_SQL
 
-
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
@@ -73,7 +72,8 @@ async def _seed_analysis_run(db: aiosqlite.Connection, row: dict) -> None:
 @pytest.mark.asyncio
 async def test_save_analysis_run_persists_row():
     """save_analysis_run writes the row; verified by querying a separate connection."""
-    import tempfile, os
+    import os
+    import tempfile
 
     row = _run_row()
     run_id = row["run_id"]
@@ -122,7 +122,8 @@ async def test_save_analysis_run_persists_row():
 @pytest.mark.asyncio
 async def test_get_latest_analysis_returns_run_metadata():
     """get_latest_analysis includes run_metadata.duration_seconds after a run is saved."""
-    import tempfile, os
+    import os
+    import tempfile
 
     row = _run_row()
     run_id = row["run_id"]
@@ -159,7 +160,8 @@ async def test_get_latest_analysis_returns_run_metadata():
 @pytest.mark.asyncio
 async def test_get_latest_analysis_returns_none_run_metadata_when_no_run():
     """get_latest_analysis returns run_metadata=None when analysis_runs has no matching row."""
-    import tempfile, os
+    import os
+    import tempfile
 
     run_id = str(uuid.uuid4())
 
@@ -192,7 +194,8 @@ async def test_get_latest_analysis_returns_none_run_metadata_when_no_run():
 @pytest.mark.asyncio
 async def test_get_latest_analysis_empty_when_no_results():
     """get_latest_analysis returns ([], None) when the DB has no analysis rows."""
-    import tempfile, os
+    import os
+    import tempfile
 
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
         db_path = tmp.name
@@ -224,8 +227,9 @@ async def test_get_latest_analysis_empty_when_no_results():
 
 @pytest.fixture()
 def client():
-    from app.main import app
     from fastapi.testclient import TestClient
+
+    from app.main import app
     return TestClient(app)
 
 

@@ -2,9 +2,9 @@
 
 import json
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Annotated, List, Literal, Union
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 @dataclass(frozen=True)
@@ -113,6 +113,71 @@ class AnalysisResult(BaseModel):
     sector_cap_exclusions: dict[str, int] = {}
     regime_gate_active: bool = False
     vix_value: float | None = None
+
+
+EnrichmentType = Literal["screenshot", "trader_chart"]
+
+
+class ScreenshotEnrichRequest(BaseModel):
+    enrichment_type: Literal["screenshot"]
+    source_url: str
+
+
+class EnrichmentJobResponse(BaseModel):
+    enrichment_id: str
+    status: str
+
+
+@dataclass
+class ConfirmedLevel:
+    """A trader-confirmed S/R level stored in analysis_tickers.custom_levels."""
+
+    type: str  # "support" or "resistance"
+    price: float
+
+
+class ExtractedLevel(BaseModel):
+    """A support or resistance level extracted by VisionAgent from a trader chart."""
+
+    type: Literal["support", "resistance"]
+    price: float
+    confidence: float
+
+
+class TraderChartEnrichRequest(BaseModel):
+    enrichment_type: Literal["trader_chart"]
+    chart_image: str
+
+
+class LevelConfirmationRequest(BaseModel):
+    enrichment_id: str
+    confirmed_indices: List[int]
+
+
+class TraderChartEnrichResponse(BaseModel):
+    enrichment_id: str
+    extracted_levels: List[ExtractedLevel]
+    status: str
+
+
+EnrichRequest = Annotated[
+    Union[ScreenshotEnrichRequest, TraderChartEnrichRequest],
+    Field(discriminator="enrichment_type"),
+]
+
+
+def filter_by_proximity(
+    levels: List[ExtractedLevel],
+    current_price: float,
+    max_pct: float = 0.15,
+) -> List[ExtractedLevel]:
+    """Return only levels within max_pct of current_price (inclusive boundary)."""
+    if current_price <= 0:
+        return levels
+    return [
+        lv for lv in levels
+        if abs(lv.price - current_price) / current_price <= max_pct
+    ]
 
 
 class DataFetchError(Exception):

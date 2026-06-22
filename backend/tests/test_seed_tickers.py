@@ -1,6 +1,5 @@
 """Offline unit tests for seed_tickers.py — no DB or network required."""
 
-import pytest
 
 from app.analysis.seed_tickers import LEGACY_TICKERS, SEED_TICKERS, SEED_VERSION
 

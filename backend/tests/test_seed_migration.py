@@ -7,7 +7,7 @@ import aiosqlite
 import pytest
 
 from app.analysis.seed_tickers import LEGACY_TICKERS, SEED_TICKERS, SEED_VERSION
-from app.db.connection import get_connection, init_db, set_db_path
+from app.db.connection import init_db, set_db_path
 from app.db.schema import DEFAULT_USER_ID
 
 

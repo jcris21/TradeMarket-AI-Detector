@@ -1,26 +1,23 @@
 """Additional tests for nex-11-signal-outcome-recorder changes to OutcomeDetector."""
 
-import math
 import uuid
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pandas as pd
-import pytest
 
-from app.db import connection as conn_module
-from app.db.connection import get_connection
-from app.db.repository import update_outcome_atomic
 from app.analysis.outcome_detector import (
-    OutcomeDetector,
-    PerformanceSummary,
     OUTCOME_EXPIRED,
     OUTCOME_STOP_HIT,
     OUTCOME_TARGET_HIT,
+    OutcomeDetector,
+    PerformanceSummary,
     _determine_outcome,
     _fetch_price_range_since,
 )
-
+from app.db import connection as conn_module
+from app.db.connection import get_connection
+from app.db.repository import update_outcome_atomic
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 

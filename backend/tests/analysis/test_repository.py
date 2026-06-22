@@ -1,8 +1,9 @@
 """Tests for analysis repository — save_analysis_results write resilience (NEX-16)."""
 
-import pytest
+from unittest.mock import patch
+
 import aiosqlite
-from unittest.mock import AsyncMock, MagicMock, patch
+import pytest
 
 from app.db.repository import save_analysis_results
 

@@ -1,6 +1,5 @@
 """US-204 route tests: 202 dispatch, 409 guard, status polling, partial results."""
 
-import asyncio
 from datetime import datetime, timezone
 
 import pytest

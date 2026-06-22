@@ -272,24 +272,43 @@ _REGIME_COLUMNS = [
     ("rank_exclusion_reason", "TEXT"),
 ]
 
+_ENRICHMENT_STATUS_COLUMNS = [
+    ("enrichment_status", "TEXT DEFAULT 'none'"),
+]
+
 _ANALYSIS_TICKERS_COLUMNS = [
     ("sector", "TEXT"),
     ("sub_sector", "TEXT"),
     ("seed_version", "TEXT"),
+    ("preferred_chart_url", "TEXT"),
+]
+
+_CUSTOM_LEVELS_TICKERS_COLUMNS = [
+    ("custom_levels", "TEXT"),
+    ("custom_levels_expires_at", "TEXT"),
+]
+
+_CUSTOM_LEVELS_RESULTS_COLUMNS = [
+    ("custom_levels_applied", "INTEGER DEFAULT 0"),
+]
+
+_ENRICHMENTS_COLUMNS = [
+    ("extracted_levels", "TEXT"),
 ]
 
 
 async def init_db() -> None:
     """Create tables and seed default data if needed."""
     # Lazy import avoids circular dependency: app.analysis -> outcome_detector -> app.db
-    from app.analysis.seed_tickers import LEGACY_TICKERS, SEED_TICKERS, SEED_VERSION
     from datetime import timedelta
+
+    from app.analysis.seed_tickers import LEGACY_TICKERS, SEED_TICKERS, SEED_VERSION
     db = await get_connection()
     try:
         await db.executescript(SCHEMA_SQL)
 
         # Lazy migration: add columns if not already present
-        for col, col_type in _BET_SIZE_COLUMNS + _OUTCOME_COLUMNS + _ATR_COLUMNS + _SCORE_QUANT_COLUMNS + _REGIME_COLUMNS:
+        for col, col_type in _BET_SIZE_COLUMNS + _OUTCOME_COLUMNS + _ATR_COLUMNS + _SCORE_QUANT_COLUMNS + _REGIME_COLUMNS + _ENRICHMENT_STATUS_COLUMNS:
             try:
                 await db.execute(
                     f"ALTER TABLE analysis_results ADD COLUMN {col} {col_type}"
@@ -302,6 +321,36 @@ async def init_db() -> None:
         await db.execute(
             "CREATE INDEX IF NOT EXISTS idx_analysis_outcome ON analysis_results(outcome)"
         )
+
+        # Lazy migration: add custom_levels columns to analysis_tickers
+        for col, col_type in _CUSTOM_LEVELS_TICKERS_COLUMNS:
+            try:
+                await db.execute(
+                    f"ALTER TABLE analysis_tickers ADD COLUMN {col} {col_type}"
+                )
+            except aiosqlite.OperationalError as e:
+                if "duplicate column name" not in str(e):
+                    raise
+
+        # Lazy migration: add custom_levels_applied to analysis_results
+        for col, col_type in _CUSTOM_LEVELS_RESULTS_COLUMNS:
+            try:
+                await db.execute(
+                    f"ALTER TABLE analysis_results ADD COLUMN {col} {col_type}"
+                )
+            except aiosqlite.OperationalError as e:
+                if "duplicate column name" not in str(e):
+                    raise
+
+        # Lazy migration: add extracted_levels to enrichments
+        for col, col_type in _ENRICHMENTS_COLUMNS:
+            try:
+                await db.execute(
+                    f"ALTER TABLE enrichments ADD COLUMN {col} {col_type}"
+                )
+            except aiosqlite.OperationalError as e:
+                if "duplicate column name" not in str(e):
+                    raise
 
         # Lazy migration: add sector/sub_sector/seed_version to analysis_tickers
         for col, col_type in _ANALYSIS_TICKERS_COLUMNS:

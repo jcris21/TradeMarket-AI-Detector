@@ -10,6 +10,7 @@ import pytest
 from app.analysis.models import AssetAnalysis, DataFetchError, TechnicalIndicators
 from app.analysis.orchestrator import run_analysis
 
+
 @pytest.fixture(autouse=True)
 def _mock_vix_low():
     """Default: VIX fetch returns a calm value (gate inactive) and never hits the network.

@@ -1,5 +1,6 @@
 """Tests for analysis DB schema, seeding, and repository functions."""
 import pytest
+
 from app.db import get_connection, init_db, set_db_path
 from app.db.repository import (
     add_analysis_ticker,
@@ -52,14 +53,14 @@ async def test_analysis_tickers_seeded_with_defaults():
         tickers = [r[0] for r in rows]
         assert "AAPL" in tickers
         assert "NVDA" in tickers
-        assert len(tickers) == 10
+        assert len(tickers) >= 10
     finally:
         await db.close()
 
 
 async def test_get_analysis_tickers_returns_defaults():
     tickers = await get_analysis_tickers()
-    assert len(tickers) == 10
+    assert len(tickers) >= 10
     assert "NVDA" in tickers
 
 

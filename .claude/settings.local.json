@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "PowerShell(& \"E:\\\\FILES 2026\\\\MVP_VIBECODE+AGENTIC\\\\finally\\\\backend\\\\.venv\\\\Scripts\\\\python.exe\" -m pip show aiohttp 2>&1)",
-      "PowerShell(netstat *)"
+      "PowerShell(netstat *)",
+      "Bash(python -m pytest tests/ -x --tb=short)",
+      "Bash(python -m ruff check .)"
     ]
   }
 }

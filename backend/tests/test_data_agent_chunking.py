@@ -1,14 +1,12 @@
 """Tests for fetch_indicators_batch chunked download, per-ticker retry, and timing."""
 
-import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pandas as pd
 import pytest
 
 from app.analysis.data_agent import _compute_indicators, fetch_indicators_batch
 from app.analysis.models import DataFetchError, TechnicalIndicators
-
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -31,10 +29,6 @@ def _make_ohlcv(rows: int = 90, last_close: float = 100.0) -> pd.DataFrame:
 
 def _make_multiindex_df(tickers: list[str], rows: int = 90) -> pd.DataFrame:
     """Return a MultiIndex batch DataFrame like yf.download returns for a list."""
-    cols = pd.MultiIndex.from_product(
-        [tickers, ["Open", "High", "Low", "Close", "Volume"]],
-        names=["Ticker", "Price"],
-    )
     data = {}
     for ticker in tickers:
         for col in ["Open", "High", "Low", "Close", "Volume"]:

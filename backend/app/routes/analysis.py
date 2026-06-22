@@ -7,16 +7,15 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Response
 from pydantic import BaseModel
 
-from app.db import (
-    add_analysis_ticker,
-    get_analysis_by_ticker,
-    get_analysis_tickers,
-    get_latest_analysis,
-    get_performance_summary,
-    remove_analysis_ticker,
-    update_enrichment_delta,
+from app.analysis.models import (
+    ConfirmedLevel,
+    EnrichmentJobResponse,
+    EnrichRequest,
+    LevelConfirmationRequest,
+    PerformanceResponse,
+    TraderChartEnrichResponse,
+    filter_by_proximity,
 )
-from app.analysis.models import PerformanceResponse
 from app.analysis.orchestrator import run_analysis
 from app.analysis.run_registry import (
     RunState,
@@ -25,6 +24,23 @@ from app.analysis.run_registry import (
     get_run,
     register_run,
 )
+from app.db import (
+    add_analysis_ticker,
+    create_enrichment_job,
+    get_analysis_by_ticker,
+    get_analysis_tickers,
+    get_enrichment_job,
+    get_latest_analysis,
+    get_performance_summary,
+    remove_analysis_ticker,
+    set_analysis_enrichment_status,
+    set_ticker_preferred_url,
+    store_custom_levels,
+    update_analysis_result_custom_levels,
+    update_enrichment_delta,
+    update_enrichment_job,
+)
+from app.utils import validate_chart_image, validate_source_url
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +72,7 @@ class AddTickerRequest(BaseModel):
     ticker: str
 
 
-class EnrichRequest(BaseModel):
+class ManualDeltaRequest(BaseModel):
     run_id: str
     delta: float
 
@@ -164,23 +180,230 @@ async def get_performance():
     return await get_performance_summary()
 
 
-@router.post("/{ticker}/enrich")
-async def enrich_ticker(ticker: str, body: EnrichRequest):
-    """Apply a post-hoc enrichment_delta to a ticker's score within a specific run.
+@router.get("/debug/extract-levels-last")
+async def debug_extract_levels_last():
+    """Temporary debug endpoint — returns last extract_levels raw model response."""
+    import pathlib
+    path = pathlib.Path("extract_levels_debug.txt")
+    if not path.exists():
+        return {"debug": "No debug file yet — upload a chart first after restarting the backend."}
+    return {"debug": path.read_text(encoding="utf-8")}
 
-    delta must be in [-15, +15]. Returns 404 if no matching row found.
+
+async def _run_screenshot_enrichment(
+    enrichment_id: str, ticker: str, source_url: str
+) -> None:
+    """Background task: capture screenshot → VisionAgent → store delta."""
+    from app.analysis.screenshot_agent import ScreenshotAgent
+    from app.analysis.vision_agent import analyze_asset
+    from app.db import get_analysis_by_ticker as _get_by_ticker
+
+    try:
+        await update_enrichment_job(enrichment_id, "processing")
+        await set_analysis_enrichment_status(ticker, "processing")
+
+        agent = ScreenshotAgent()
+        png_bytes = await agent.capture(source_url)
+
+        latest = await _get_by_ticker(ticker)
+        if latest is None:
+            raise ValueError(f"No analysis row found for {ticker} — cannot enrich")
+
+        from app.analysis.models import TechnicalIndicators
+        indicators = TechnicalIndicators(
+            ticker=ticker,
+            current_price=latest.get("entry_price", 0.0),
+            macd_signal="neutral",
+            macd_histogram=0.0,
+            rsi=50.0,
+            volume_ratio=1.0,
+            support_1=latest.get("stop_loss", 0.0),
+            support_2=latest.get("stop_loss", 0.0),
+            resistance_1=latest.get("target_price", 0.0),
+            resistance_2=latest.get("target_price", 0.0),
+        )
+
+        analysis = await analyze_asset(indicators, screenshot_bytes=png_bytes)
+
+        confidence = analysis.confidence
+        enrichment_max_delta = 15.0
+        enrichment_delta = round(min((confidence - 0.5) * 2 * enrichment_max_delta, enrichment_max_delta), 2)
+
+        completed_at = datetime.now(timezone.utc).isoformat()
+        await update_enrichment_job(
+            enrichment_id,
+            "completed",
+            enrichment_delta=enrichment_delta,
+            completed_at=completed_at,
+        )
+        await set_analysis_enrichment_status(ticker, "completed", enrichment_delta=enrichment_delta)
+        await set_ticker_preferred_url(ticker, source_url)
+
+    except Exception as exc:
+        logger.exception("screenshot_enrichment_failed", extra={"enrichment_id": enrichment_id, "ticker": ticker})
+        await update_enrichment_job(
+            enrichment_id,
+            "failed",
+            error_message=str(exc),
+            completed_at=datetime.now(timezone.utc).isoformat(),
+        )
+        await set_analysis_enrichment_status(ticker, "failed")
+
+
+@router.post("/{ticker}/enrich", status_code=200)
+async def enrich_ticker(
+    ticker: str,
+    background_tasks: BackgroundTasks,
+    body: EnrichRequest | ManualDeltaRequest,
+):
+    """Enrich a ticker.
+
+    - No enrichment_type (ManualDeltaRequest): apply manual delta; returns 200.
+    - enrichment_type="screenshot": async screenshot + VisionAgent; returns 202.
+    - Unknown enrichment_type: returns 422.
     """
     ticker = ticker.upper()
-    if not (-15.0 <= body.delta <= 15.0):
-        raise HTTPException(status_code=422, detail="delta must be between -15 and +15")
-    updated = await update_enrichment_delta(ticker, body.run_id, body.delta)
-    if not updated:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No analysis row found for {ticker} in run {body.run_id}",
+
+    if isinstance(body, ManualDeltaRequest):
+        if not (-15.0 <= body.delta <= 15.0):
+            raise HTTPException(status_code=422, detail="delta must be between -15 and +15")
+        updated = await update_enrichment_delta(ticker, body.run_id, body.delta)
+        if not updated:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No analysis row found for {ticker} in run {body.run_id}",
+            )
+        result = await get_analysis_by_ticker(ticker)
+        return {
+            "ticker": ticker,
+            "run_id": body.run_id,
+            "enrichment_delta": body.delta,
+            "score_enriched": result.get("score_enriched") if result else None,
+        }
+
+    if body.enrichment_type == "screenshot":
+        existing = await get_analysis_by_ticker(ticker)
+        if existing is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No analysis found for {ticker}. Run /api/analysis/run first.",
+            )
+        validate_source_url(body.source_url)
+        enrichment_id = await create_enrichment_job(ticker, "screenshot", body.source_url)
+        await set_analysis_enrichment_status(ticker, "pending")
+        background_tasks.add_task(_run_screenshot_enrichment, enrichment_id, ticker, body.source_url)
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=202,
+            content=EnrichmentJobResponse(enrichment_id=enrichment_id, status="pending").model_dump(),
         )
-    result = await get_analysis_by_ticker(ticker)
-    return {"ticker": ticker, "run_id": body.run_id, "enrichment_delta": body.delta, "score_enriched": result.get("score_enriched") if result else None}
+
+    if body.enrichment_type == "trader_chart":
+        existing = await get_analysis_by_ticker(ticker)
+        if existing is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No analysis found for {ticker}. Run /api/analysis/run first.",
+            )
+        image_bytes = validate_chart_image(body.chart_image)
+
+        from app.analysis.vision_agent import extract_levels
+        levels = await extract_levels(image_bytes)
+
+        current_price = existing.get("entry_price") or 0.0
+        filtered = filter_by_proximity(levels, current_price)
+
+        import json as _json
+        levels_json = _json.dumps([lv.model_dump() for lv in filtered])
+        enrichment_id = await create_enrichment_job(
+            ticker,
+            "trader_chart",
+            status="pending_confirmation",
+            extracted_levels=levels_json,
+        )
+        return TraderChartEnrichResponse(
+            enrichment_id=enrichment_id,
+            extracted_levels=filtered,
+            status="pending_confirmation",
+        )
+
+    raise HTTPException(status_code=422, detail=f"Unknown enrichment_type: {body.enrichment_type}")
+
+
+@router.post("/{ticker}/enrich/confirm")
+async def confirm_enrichment(ticker: str, body: LevelConfirmationRequest):
+    """Confirm trader-selected S/R levels, apply scoring, and persist with TTL.
+
+    Returns updated score_quant, enrichment_delta, and score_enriched.
+    """
+    import json as _json
+    import os
+
+    ticker = ticker.upper()
+
+    job = await get_enrichment_job(body.enrichment_id)
+    if job is None or job["ticker"] != ticker:
+        raise HTTPException(status_code=404, detail="Enrichment job not found for this ticker")
+
+    # Idempotency: already confirmed → return existing result
+    if job["status"] == "completed":
+        latest = await get_analysis_by_ticker(ticker)
+        sq = (latest or {}).get("score_quant") or 0.0
+        ed = (latest or {}).get("enrichment_delta") or 0.0
+        return {
+            "custom_levels_applied": (latest or {}).get("custom_levels_applied") or 0,
+            "enrichment_delta": ed,
+            "score_quant": sq,
+            "score_enriched": round(sq + ed, 2),
+        }
+
+    raw_levels = _json.loads(job.get("extracted_levels") or "[]")
+    extracted_count = len(raw_levels)
+
+    # Validate indices
+    for idx in body.confirmed_indices:
+        if idx < 0 or idx >= extracted_count:
+            raise HTTPException(
+                status_code=422, detail="confirmed_indices contains out-of-range values"
+            )
+
+    # Cap to first 2
+    capped_indices = body.confirmed_indices[:2]
+    confirmed_levels = [
+        ConfirmedLevel(type=raw_levels[i]["type"], price=raw_levels[i]["price"])
+        for i in capped_indices
+    ]
+
+    latest = await get_analysis_by_ticker(ticker)
+    if latest is None:
+        raise HTTPException(
+            status_code=404, detail=f"No analysis found for {ticker}"
+        )
+    entry_price = latest.get("entry_price") or 0.0
+    target_price = latest.get("target_price") or 0.0
+    atr_14_pct = latest.get("atr_14_pct") or 0.0
+    atr_14 = atr_14_pct * entry_price if (atr_14_pct and entry_price) else 0.0
+
+    from app.analysis.scoring_agent import _apply_custom_levels
+    enrichment_delta, applied_count = _apply_custom_levels(
+        entry_price, target_price, atr_14, confirmed_levels
+    )
+
+    ttl_days = int(os.environ.get("CUSTOM_LEVEL_TTL_DAYS", "5"))
+    from app.utils import trading_days_from_now
+    expires_at = trading_days_from_now(ttl_days).isoformat()
+
+    await store_custom_levels(ticker, confirmed_levels, expires_at)
+    await update_analysis_result_custom_levels(ticker, applied_count, enrichment_delta)
+    await update_enrichment_job(body.enrichment_id, "completed")
+
+    score_quant = latest.get("score_quant") or 0.0
+    return {
+        "custom_levels_applied": applied_count,
+        "enrichment_delta": enrichment_delta,
+        "score_quant": score_quant,
+        "score_enriched": round(score_quant + enrichment_delta, 2),
+    }
 
 
 @router.get("/{ticker}")
@@ -192,5 +415,7 @@ async def get_ticker_analysis(ticker: str):
         raise HTTPException(
             status_code=404, detail=f"No analysis found for {ticker}. Run /api/analysis/run first."
         )
+    if "enrichment_status" not in result:
+        result["enrichment_status"] = "none"
     return result
 
