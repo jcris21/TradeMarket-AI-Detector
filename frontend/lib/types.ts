@@ -114,6 +114,7 @@ export interface AssetAnalysis {
   score_quant?: number | null;
   score_legacy?: number | null;
   enrichment_delta?: number | null;
+  enrichment_type?: "trader_chart" | "auto_screenshot" | null;
   score_enriched?: number | null;
   rank: number | null;
   rank_exclusion_reason?: string | null;
@@ -186,6 +187,13 @@ export interface LevelConfirmResult {
   score_enriched: number;
 }
 
+export interface SegmentPerformance {
+  total: number;
+  hit_ratio: number | null;
+  profit_factor: number | null;
+  realized_rr: number | null;
+}
+
 /** Performance summary from GET /api/analysis/performance */
 export interface PerformanceSummary {
   phase_gate_active: boolean;
@@ -204,4 +212,6 @@ export interface PerformanceSummary {
   pf_status: "green" | "red" | null;
   rr_status: "green" | null;
   below_breakeven: boolean;
+  b2_enriched?: SegmentPerformance | null;
+  non_enriched?: SegmentPerformance | null;
 }

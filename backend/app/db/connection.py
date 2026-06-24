@@ -296,6 +296,10 @@ _ENRICHMENTS_COLUMNS = [
     ("extracted_levels", "TEXT"),
 ]
 
+_ENRICHMENT_TYPE_RESULTS_COLUMNS = [
+    ("enrichment_type", "TEXT"),
+]
+
 
 async def init_db() -> None:
     """Create tables and seed default data if needed."""
@@ -347,6 +351,16 @@ async def init_db() -> None:
             try:
                 await db.execute(
                     f"ALTER TABLE enrichments ADD COLUMN {col} {col_type}"
+                )
+            except aiosqlite.OperationalError as e:
+                if "duplicate column name" not in str(e):
+                    raise
+
+        # Lazy migration: add enrichment_type to analysis_results
+        for col, col_type in _ENRICHMENT_TYPE_RESULTS_COLUMNS:
+            try:
+                await db.execute(
+                    f"ALTER TABLE analysis_results ADD COLUMN {col} {col_type}"
                 )
             except aiosqlite.OperationalError as e:
                 if "duplicate column name" not in str(e):

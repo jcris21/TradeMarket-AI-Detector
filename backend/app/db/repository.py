@@ -467,6 +467,42 @@ async def update_outcome_atomic(
         await db.close()
 
 
+def _compute_segment_performance(rows: list) -> "dict | None":
+    """Compute hit_ratio/profit_factor/realized_rr for a list of resolved outcome rows.
+
+    Returns None when fewer than 30 conclusive signals (TARGET_HIT + STOP_HIT).
+    """
+    target_hits = sum(1 for r in rows if r["outcome"] == "TARGET_HIT")
+    stop_hits = sum(1 for r in rows if r["outcome"] == "STOP_HIT")
+    conclusive = target_hits + stop_hits
+    if conclusive < 30:
+        return None
+    total_gain = sum(
+        r["actual_gain_pct"] for r in rows
+        if r["outcome"] == "TARGET_HIT" and r["actual_gain_pct"] is not None
+    )
+    total_loss = sum(
+        r["actual_loss_pct"] for r in rows
+        if r["outcome"] == "STOP_HIT" and r["actual_loss_pct"] is not None
+    )
+    hit_ratio = round(target_hits / conclusive, 4)
+    if total_loss > 0:
+        profit_factor = round(total_gain / total_loss, 4)
+    elif total_gain > 0:
+        profit_factor = 999.0
+    else:
+        profit_factor = 0.0
+    avg_gain = total_gain / target_hits if target_hits > 0 else 0.0
+    avg_loss = total_loss / stop_hits if stop_hits > 0 else 0.0
+    realized_rr = round(avg_gain / avg_loss, 2) if avg_loss > 0 else None
+    return {
+        "total": len(rows),
+        "hit_ratio": hit_ratio,
+        "profit_factor": profit_factor,
+        "realized_rr": realized_rr,
+    }
+
+
 async def get_performance_summary(user_id: str = DEFAULT_USER_ID) -> dict:
     """Compute aggregated outcome metrics from analysis_results."""
     db = await get_connection()
@@ -485,8 +521,27 @@ async def get_performance_summary(user_id: str = DEFAULT_USER_ID) -> dict:
         )
         orphan_row = await orphan_cursor.fetchone()
         orphaned_count = orphan_row["cnt"] if orphan_row else 0
+
+        # B2 segmentation queries
+        b2_cursor = await db.execute(
+            "SELECT outcome, actual_gain_pct, actual_loss_pct FROM analysis_results "
+            "WHERE user_id = ? AND outcome IS NOT NULL AND enrichment_type = 'auto_screenshot'",
+            (user_id,),
+        )
+        b2_rows = await b2_cursor.fetchall()
+
+        non_b2_cursor = await db.execute(
+            "SELECT outcome, actual_gain_pct, actual_loss_pct FROM analysis_results "
+            "WHERE user_id = ? AND outcome IS NOT NULL "
+            "AND (enrichment_type IS NULL OR enrichment_type != 'auto_screenshot')",
+            (user_id,),
+        )
+        non_b2_rows = await non_b2_cursor.fetchall()
     finally:
         await db.close()
+
+    b2_segment = _compute_segment_performance(b2_rows)
+    non_enriched_segment = _compute_segment_performance(non_b2_rows)
 
     target_hits = sum(1 for r in rows if r["outcome"] == "TARGET_HIT")
     stop_hits = sum(1 for r in rows if r["outcome"] == "STOP_HIT")
@@ -566,6 +621,8 @@ async def get_performance_summary(user_id: str = DEFAULT_USER_ID) -> dict:
         "pf_status": pf_status,
         "rr_status": rr_status,
         "below_breakeven": below_breakeven,
+        "b2_enriched": b2_segment,
+        "non_enriched": non_enriched_segment,
     }
 
 
@@ -617,15 +674,19 @@ async def get_latest_analysis(user_id: str = DEFAULT_USER_ID) -> list[dict]:
 
 
 async def update_enrichment_delta(
-    ticker: str, run_id: str, delta: float, user_id: str = DEFAULT_USER_ID
+    ticker: str,
+    run_id: str,
+    delta: float,
+    enrichment_type: str | None = None,
+    user_id: str = DEFAULT_USER_ID,
 ) -> bool:
-    """Set enrichment_delta for a ticker within a specific run. Returns True if updated."""
+    """Set enrichment_delta (and optionally enrichment_type) for a ticker within a run."""
     db = await get_connection()
     try:
         cursor = await db.execute(
-            "UPDATE analysis_results SET enrichment_delta = ? "
+            "UPDATE analysis_results SET enrichment_delta = ?, enrichment_type = ? "
             "WHERE user_id = ? AND ticker = ? AND run_id = ?",
-            (delta, user_id, ticker.upper(), run_id),
+            (delta, enrichment_type, user_id, ticker.upper(), run_id),
         )
         await db.commit()
         return cursor.rowcount > 0
@@ -724,6 +785,19 @@ async def set_ticker_preferred_url(ticker: str, url: str) -> None:
         await db.close()
 
 
+async def reset_stale_enrichments() -> None:
+    """Set status='failed' for any pending/processing enrichment jobs on startup."""
+    db = await get_connection()
+    try:
+        await db.execute(
+            "UPDATE enrichments SET status = 'failed', error_message = 'server restarted' "
+            "WHERE status IN ('pending', 'processing')"
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
 async def store_custom_levels(
     ticker: str, levels: list, expires_at: str
 ) -> None:
@@ -809,30 +883,53 @@ async def set_analysis_enrichment_status(
     ticker: str,
     status: str,
     enrichment_delta: float | None = None,
+    enrichment_type: str | None = None,
+    argument: str | None = None,
     user_id: str = DEFAULT_USER_ID,
 ) -> None:
-    """Update enrichment_status and optionally enrichment_delta on the latest analysis row."""
+    """Update enrichment_status and optionally enrichment_delta/enrichment_type/argument."""
+    set_clauses = ["enrichment_status = ?"]
+    params: list = [status]
+    if enrichment_delta is not None:
+        set_clauses.append("enrichment_delta = ?")
+        params.append(enrichment_delta)
+    if enrichment_type is not None:
+        set_clauses.append("enrichment_type = ?")
+        params.append(enrichment_type)
+    if argument is not None:
+        set_clauses.append("argument = ?")
+        params.append(argument)
+    set_sql = ", ".join(set_clauses)
+    subquery = (
+        "SELECT id FROM analysis_results WHERE user_id = ? AND ticker = ? "
+        "ORDER BY analyzed_at DESC LIMIT 1"
+    )
+    params += [user_id, ticker.upper(), user_id, ticker.upper()]
     db = await get_connection()
     try:
-        if enrichment_delta is not None:
-            await db.execute(
-                "UPDATE analysis_results SET enrichment_status = ?, enrichment_delta = ? "
-                "WHERE user_id = ? AND ticker = ? AND id = ("
-                "  SELECT id FROM analysis_results WHERE user_id = ? AND ticker = ? "
-                "  ORDER BY analyzed_at DESC LIMIT 1"
-                ")",
-                (status, enrichment_delta, user_id, ticker.upper(), user_id, ticker.upper()),
-            )
-        else:
-            await db.execute(
-                "UPDATE analysis_results SET enrichment_status = ? "
-                "WHERE user_id = ? AND ticker = ? AND id = ("
-                "  SELECT id FROM analysis_results WHERE user_id = ? AND ticker = ? "
-                "  ORDER BY analyzed_at DESC LIMIT 1"
-                ")",
-                (status, user_id, ticker.upper(), user_id, ticker.upper()),
-            )
+        await db.execute(
+            f"UPDATE analysis_results SET {set_sql} "
+            f"WHERE user_id = ? AND ticker = ? AND id = ({subquery})",
+            params,
+        )
         await db.commit()
+    finally:
+        await db.close()
+
+
+async def find_pending_enrichment_job(ticker: str) -> dict | None:
+    """Return an in-flight enrichment job for ticker (pending or processing), or None."""
+    db = await get_connection()
+    try:
+        cursor = await db.execute(
+            "SELECT id, enrichment_type, status FROM enrichments "
+            "WHERE ticker = ? AND enrichment_type IN ('auto_screenshot', 'screenshot') "
+            "AND status IN ('pending', 'processing') "
+            "ORDER BY created_at DESC LIMIT 1",
+            (ticker.upper(),),
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
     finally:
         await db.close()
 

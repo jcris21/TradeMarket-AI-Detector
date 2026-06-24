@@ -148,11 +148,14 @@ function RunProgress({
 function ScoreBreakdownBar({ asset }: { asset: AssetAnalysis }) {
   const sq = asset.score_quant ?? asset.score ?? 0;
   const hasEnrichment = asset.enrichment_delta != null && asset.enrichment_delta !== 0;
+  const isAutoScreenshot =
+    asset.enrichment_type === "auto_screenshot" &&
+    asset.enrichment_delta != null &&
+    asset.score_quant != null;
   const displayScore = asset.score_enriched ?? asset.score_quant ?? asset.score;
   const enrichedLabel = asset.score_enriched != null ? "enriched" : "quant";
 
   // Approximate component widths based on max possible per component
-  const summary = asset.indicators_summary as Record<string, unknown>;
   const rr = asset.risk_reward_ratio ?? 0;
   const rrPct = Math.min((rr >= 4 ? 30 : rr >= 3 ? 22 : rr >= 2 ? 14 : 0) / 100, 1) * 30;
   const confluencePct = 20;
@@ -161,22 +164,42 @@ function ScoreBreakdownBar({ asset }: { asset: AssetAnalysis }) {
 
   return (
     <div className="px-3 py-1.5 bg-bg-hover border-b border-border">
-      <div className="flex items-center gap-2 mb-1">
-        <span className="text-xs text-text-muted font-mono">Score</span>
-        <span
-          className={`text-xs font-mono font-bold tabular-nums${hasEnrichment ? " text-amber-400" : " text-white"}`}
-          style={hasEnrichment ? { textShadow: "0 0 8px rgba(251,191,36,0.6)" } : undefined}
-        >
-          {displayScore?.toFixed(1) ?? "—"}
-        </span>
-        <span className="text-xs text-text-muted font-mono">({enrichedLabel})</span>
-        {hasEnrichment && (
-          <span className="text-xs font-mono text-amber-400">
-            Δ{(asset.enrichment_delta ?? 0) > 0 ? "+" : ""}
-            {asset.enrichment_delta?.toFixed(1)}
+      {/* 8.1: Side-by-side score display for auto_screenshot enrichment */}
+      {isAutoScreenshot ? (
+        <div className="flex items-center gap-3 mb-1">
+          <span className="text-xs text-text-muted font-mono">Quant</span>
+          <span className="text-xs font-mono font-bold tabular-nums text-white">
+            {asset.score_quant?.toFixed(1) ?? "—"}
           </span>
-        )}
-      </div>
+          <span className="text-xs text-text-muted font-mono">→</span>
+          <span
+            className="text-xs font-mono font-bold tabular-nums text-amber-400"
+            style={{ textShadow: "0 0 8px rgba(251,191,36,0.6)" }}
+          >
+            {asset.score_enriched?.toFixed(1) ?? "—"}
+          </span>
+          <span className="text-xs font-mono text-amber-400">
+            +{asset.enrichment_delta?.toFixed(1)} visual, auto screenshot
+          </span>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 mb-1">
+          <span className="text-xs text-text-muted font-mono">Score</span>
+          <span
+            className={`text-xs font-mono font-bold tabular-nums${hasEnrichment ? " text-amber-400" : " text-white"}`}
+            style={hasEnrichment ? { textShadow: "0 0 8px rgba(251,191,36,0.6)" } : undefined}
+          >
+            {displayScore?.toFixed(1) ?? "—"}
+          </span>
+          <span className="text-xs text-text-muted font-mono">({enrichedLabel})</span>
+          {hasEnrichment && (
+            <span className="text-xs font-mono text-amber-400">
+              Δ{(asset.enrichment_delta ?? 0) > 0 ? "+" : ""}
+              {asset.enrichment_delta?.toFixed(1)}
+            </span>
+          )}
+        </div>
+      )}
       <div className="flex h-1.5 rounded overflow-hidden gap-px w-full max-w-xs">
         <div
           className="bg-accent-blue opacity-90"
@@ -213,6 +236,10 @@ function ScoreBreakdownBar({ asset }: { asset: AssetAnalysis }) {
         <span className="text-gray-400">Adj</span>
         {hasEnrichment && <span style={{ color: "#fbbf24" }}>Enrich</span>}
       </div>
+      {/* 8.2: Render argument as-is (prefix "💬 Visual analysis: " already embedded) */}
+      {asset.argument && (
+        <p className="mt-2 text-xs text-text-muted font-mono leading-relaxed">{asset.argument}</p>
+      )}
     </div>
   );
 }

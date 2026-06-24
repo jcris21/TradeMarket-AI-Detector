@@ -86,7 +86,8 @@ CREATE TABLE IF NOT EXISTS analysis_results (
     score_legacy REAL,
     enrichment_delta REAL,
     rank_exclusion_reason TEXT,
-    enrichment_status TEXT DEFAULT 'none'
+    enrichment_status TEXT DEFAULT 'none',
+    enrichment_type TEXT
 );
 
 CREATE TABLE IF NOT EXISTS analysis_tickers (

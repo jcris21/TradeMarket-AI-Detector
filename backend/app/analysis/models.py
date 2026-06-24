@@ -49,6 +49,7 @@ class AssetAnalysis(BaseModel):
     score_legacy: float | None = None
     score_delta: float | None = None
     enrichment_delta: float | None = None
+    enrichment_type: Literal["trader_chart", "auto_screenshot"] | None = None
     rank: int | None = None
     rank_exclusion_reason: str | None = None
     sector: str | None = None
@@ -96,6 +97,7 @@ class AssetAnalysis(BaseModel):
             "score_quant": self.score_quant,
             "score_legacy": self.score_legacy,
             "enrichment_delta": self.enrichment_delta,
+            "enrichment_type": self.enrichment_type,
             "rank_exclusion_reason": self.rank_exclusion_reason,
         }
 
@@ -115,7 +117,13 @@ class AnalysisResult(BaseModel):
     vix_value: float | None = None
 
 
-EnrichmentType = Literal["screenshot", "trader_chart"]
+EnrichmentType = Literal["screenshot", "trader_chart", "auto_screenshot"]
+EnrichmentStatus = Literal["none", "pending", "processing", "completed", "failed"]
+
+
+class AutoScreenshotEnrichRequest(BaseModel):
+    enrichment_type: Literal["auto_screenshot"]
+    source_url: str
 
 
 class ScreenshotEnrichRequest(BaseModel):
@@ -161,7 +169,7 @@ class TraderChartEnrichResponse(BaseModel):
 
 
 EnrichRequest = Annotated[
-    Union[ScreenshotEnrichRequest, TraderChartEnrichRequest],
+    Union[AutoScreenshotEnrichRequest, ScreenshotEnrichRequest, TraderChartEnrichRequest],
     Field(discriminator="enrichment_type"),
 ]
 
@@ -194,6 +202,15 @@ class InvestingComAuthError(Exception):
     pass
 
 
+class SegmentPerformance(BaseModel):
+    """Outcome metrics for one enrichment-type segment."""
+
+    total: int
+    hit_ratio: float | None
+    profit_factor: float | None
+    realized_rr: float | None
+
+
 class PerformanceResponse(BaseModel):
     """Response shape for GET /api/analysis/performance."""
 
@@ -213,3 +230,5 @@ class PerformanceResponse(BaseModel):
     pf_status: str | None
     rr_status: str | None
     below_breakeven: bool
+    b2_enriched: SegmentPerformance | None = None
+    non_enriched: SegmentPerformance | None = None

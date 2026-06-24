@@ -8,11 +8,13 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Response
 from pydantic import BaseModel
 
 from app.analysis.models import (
+    AutoScreenshotEnrichRequest,
     ConfirmedLevel,
     EnrichmentJobResponse,
     EnrichRequest,
     LevelConfirmationRequest,
     PerformanceResponse,
+    ScreenshotEnrichRequest,
     TraderChartEnrichResponse,
     filter_by_proximity,
 )
@@ -27,6 +29,7 @@ from app.analysis.run_registry import (
 from app.db import (
     add_analysis_ticker,
     create_enrichment_job,
+    find_pending_enrichment_job,
     get_analysis_by_ticker,
     get_analysis_tickers,
     get_enrichment_job,
@@ -193,7 +196,9 @@ async def debug_extract_levels_last():
 async def _run_screenshot_enrichment(
     enrichment_id: str, ticker: str, source_url: str
 ) -> None:
-    """Background task: capture screenshot → VisionAgent → store delta."""
+    """Background task: capture screenshot → VisionAgent → store B2 delta."""
+    import os
+
     from app.analysis.screenshot_agent import ScreenshotAgent
     from app.analysis.vision_agent import analyze_asset
     from app.db import get_analysis_by_ticker as _get_by_ticker
@@ -201,13 +206,17 @@ async def _run_screenshot_enrichment(
     try:
         await update_enrichment_job(enrichment_id, "processing")
         await set_analysis_enrichment_status(ticker, "processing")
+        logger.info("screenshot_enrichment_started", extra={"enrichment_id": enrichment_id, "ticker": ticker, "enrichment_path": "B2"})
 
         agent = ScreenshotAgent()
         png_bytes = await agent.capture(source_url)
+        logger.info("screenshot_captured", extra={"enrichment_id": enrichment_id, "ticker": ticker, "enrichment_path": "B2"})
 
         latest = await _get_by_ticker(ticker)
         if latest is None:
             raise ValueError(f"No analysis row found for {ticker} — cannot enrich")
+
+        existing_delta: float = latest.get("enrichment_delta") or 0.0
 
         from app.analysis.models import TechnicalIndicators
         indicators = TechnicalIndicators(
@@ -224,23 +233,45 @@ async def _run_screenshot_enrichment(
         )
 
         analysis = await analyze_asset(indicators, screenshot_bytes=png_bytes)
+        logger.info("vision_analysis_done", extra={"enrichment_id": enrichment_id, "ticker": ticker, "enrichment_path": "B2", "confidence": analysis.confidence})
 
-        confidence = analysis.confidence
-        enrichment_max_delta = 15.0
-        enrichment_delta = round(min((confidence - 0.5) * 2 * enrichment_max_delta, enrichment_max_delta), 2)
+        # B2 formula (read env at execution time so tests can override)
+        enrichment_max_delta = float(os.environ.get("ENRICHMENT_MAX_DELTA", "15"))
+        support_validated_bonus = float(os.environ.get("SUPPORT_VALIDATED_BONUS", "2.0"))
+        enrichment_delta_b2 = round(
+            min(
+                analysis.confidence * enrichment_max_delta
+                + (support_validated_bonus if analysis.support_validated else 0.0),
+                enrichment_max_delta,
+            ),
+            2,
+        )
+
+        # B1 + B2 conflict resolution: take max of new B2 delta and existing delta
+        final_delta = max(enrichment_delta_b2, existing_delta)
+
+        # Argument display prefix
+        argument_display = f"💬 Visual analysis: {analysis.argument}"
 
         completed_at = datetime.now(timezone.utc).isoformat()
         await update_enrichment_job(
             enrichment_id,
             "completed",
-            enrichment_delta=enrichment_delta,
+            enrichment_delta=final_delta,
             completed_at=completed_at,
         )
-        await set_analysis_enrichment_status(ticker, "completed", enrichment_delta=enrichment_delta)
+        await set_analysis_enrichment_status(
+            ticker,
+            "completed",
+            enrichment_delta=final_delta,
+            enrichment_type="auto_screenshot",
+            argument=argument_display,
+        )
         await set_ticker_preferred_url(ticker, source_url)
+        logger.info("screenshot_enrichment_completed", extra={"enrichment_id": enrichment_id, "ticker": ticker, "enrichment_path": "B2", "final_delta": final_delta})
 
     except Exception as exc:
-        logger.exception("screenshot_enrichment_failed", extra={"enrichment_id": enrichment_id, "ticker": ticker})
+        logger.exception("screenshot_enrichment_failed", extra={"enrichment_id": enrichment_id, "ticker": ticker, "enrichment_path": "B2"})
         await update_enrichment_job(
             enrichment_id,
             "failed",
@@ -281,7 +312,7 @@ async def enrich_ticker(
             "score_enriched": result.get("score_enriched") if result else None,
         }
 
-    if body.enrichment_type == "screenshot":
+    if isinstance(body, (AutoScreenshotEnrichRequest, ScreenshotEnrichRequest)):
         existing = await get_analysis_by_ticker(ticker)
         if existing is None:
             raise HTTPException(
@@ -289,7 +320,17 @@ async def enrich_ticker(
                 detail=f"No analysis found for {ticker}. Run /api/analysis/run first.",
             )
         validate_source_url(body.source_url)
-        enrichment_id = await create_enrichment_job(ticker, "screenshot", body.source_url)
+
+        # Idempotency: return existing in-flight job if one is already pending/processing
+        in_flight = await find_pending_enrichment_job(ticker)
+        if in_flight is not None:
+            from fastapi.responses import JSONResponse
+            return JSONResponse(
+                status_code=202,
+                content=EnrichmentJobResponse(enrichment_id=in_flight["id"], status="pending").model_dump(),
+            )
+
+        enrichment_id = await create_enrichment_job(ticker, "auto_screenshot", body.source_url)
         await set_analysis_enrichment_status(ticker, "pending")
         background_tasks.add_task(_run_screenshot_enrichment, enrichment_id, ticker, body.source_url)
         from fastapi.responses import JSONResponse

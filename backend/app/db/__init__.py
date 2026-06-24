@@ -40,6 +40,7 @@ Public API:
     update_enrichment_job              - Update status/delta/error on enrichment job
     set_ticker_preferred_url           - Save preferred_chart_url on analysis_tickers
     set_analysis_enrichment_status     - Update enrichment_status on analysis_results
+    reset_stale_enrichments            - Mark pending/processing enrichments as failed on startup
 
     store_custom_levels                - Persist confirmed S/R levels with TTL
     load_active_custom_levels          - Fetch non-expired custom levels for a ticker
@@ -54,6 +55,7 @@ from .repository import (
     create_enrichment_job,
     delete_position,
     expire_stale_levels,
+    find_pending_enrichment_job,
     get_analysis_by_ticker,
     get_analysis_tickers,
     get_cash_balance,
@@ -71,6 +73,7 @@ from .repository import (
     load_active_custom_levels,
     remove_analysis_ticker,
     remove_from_watchlist,
+    reset_stale_enrichments,
     save_analysis_results,
     set_analysis_enrichment_status,
     set_ticker_preferred_url,
@@ -115,10 +118,12 @@ __all__ = [
     "get_enrichment_job",
     "update_enrichment_job",
     "set_ticker_preferred_url",
+    "reset_stale_enrichments",
     "set_analysis_enrichment_status",
     "store_custom_levels",
     "load_active_custom_levels",
     "expire_stale_levels",
+    "find_pending_enrichment_job",
     "update_analysis_result_custom_levels",
     "DEFAULT_USER_ID",
     "DEFAULT_TICKERS",
