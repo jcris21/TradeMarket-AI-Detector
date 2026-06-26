@@ -129,6 +129,207 @@ _MOCK_ANALYSIS_SEED = [
     },
 ]
 
+# ── Signal detail panel validation seed (SEED_SIGNAL_DETAIL=true) ────────────
+# Five rows covering every enrichment state the frontend signal detail panel
+# must render for US-303 (B2 auto_screenshot path):
+#
+#   GOOGL (rank 1): B2 enriched — score_quant=88.2, delta=+13.05
+#                   enrichment_type="auto_screenshot", argument with 💬 prefix
+#                   → side-by-side score_quant / score_enriched display
+#   AMZN  (rank 2): quant-only  — score_quant=65.52, no enrichment
+#                   → shows quant score without delta glow
+#   MSFT  (rank 3): enrichment pending — score_quant=71.80, status="pending"
+#                   → pending spinner / no score_enriched yet
+#   NVDA  (rank 4): B2 capped   — delta=15.0 (support_validated_bonus applied)
+#                   → delta glow at maximum, score_enriched = 94.4
+#   AAPL  (rank 5): legacy      — score only, no score_quant
+#                   → legacy score display (analyzed_at=now; orphaned badge
+#                      requires 35+ days so will NOT appear on fresh seed)
+_MOCK_SIGNAL_DETAIL_SEED = [
+    {
+        "ticker": "GOOGL",
+        "rank": 1,
+        "score": 88.2,
+        "score_quant": 88.2,
+        "enrichment_delta": 13.05,  # confidence=0.87 × 15, no support_validated_bonus
+        "enrichment_type": "auto_screenshot",
+        "enrichment_status": "completed",
+        "signal": "BUY",
+        "confidence": 0.87,
+        "risk_reward_ratio": 4.8,
+        "entry_price": 178.50,
+        "target_price": 208.54,
+        "stop_loss": 172.20,
+        "support_validated": 1,
+        "argument": (
+            "💬 Visual analysis: GOOGL muestra ruptura alcista sobre resistencia clave en "
+            "$208.54 con confirmación de volumen (1.52× sobre media). RSI en zona neutral "
+            "(48.2) con amplio espacio de subida. Soporte S1 en $172.20 validado "
+            "visualmente — tres testeos sin ruptura. Setup B2 auto-screenshot enrichment "
+            "aplicado: delta +13.05 pts (confidence 0.87 × 15)."
+        ),
+        "indicators_summary": json.dumps({
+            "macd": "bullish_crossover",
+            "rsi": 48.2,
+            "volume": 1.52,
+            "support_1": 172.20,
+            "resistance_1": 208.54,
+        }),
+        "expected_gain_per10": 1.68,
+        "expected_loss_per10": 0.35,
+        "expected_value_per10": round(0.35 * 1.68 - 0.65 * 0.35, 2),
+        "hit_rate_used": 0.35,
+        "hit_rate_source": "assumed",
+        "analyzed_at_days_ago": 0,
+        "atr_14_pct": 0.020,
+        "stop_viable": 1,
+    },
+    {
+        "ticker": "AMZN",
+        "rank": 2,
+        "score": 65.52,
+        "score_quant": 65.52,
+        "enrichment_delta": None,
+        "enrichment_type": None,
+        "enrichment_status": "none",
+        "signal": "BUY",
+        "confidence": 0.74,
+        "risk_reward_ratio": 3.3,
+        "entry_price": 198.20,
+        "target_price": 223.61,
+        "stop_loss": 190.50,
+        "support_validated": 1,
+        "argument": (
+            "AMZN presenta cruce alcista de MACD y RSI neutral-positivo (52.1), pero "
+            "volumen por debajo de la media (0.98×) — confluencia parcial 2/3. Solo "
+            "score cuantitativo, sin enriquecimiento visual aplicado."
+        ),
+        "indicators_summary": json.dumps({
+            "macd": "bullish_crossover",
+            "rsi": 52.1,
+            "volume": 0.98,
+            "support_1": 190.50,
+            "resistance_1": 223.61,
+        }),
+        "expected_gain_per10": 1.28,
+        "expected_loss_per10": 0.39,
+        "expected_value_per10": round(0.35 * 1.28 - 0.65 * 0.39, 2),
+        "hit_rate_used": 0.35,
+        "hit_rate_source": "assumed",
+        "analyzed_at_days_ago": 0,
+        "atr_14_pct": 0.055,
+        "stop_viable": 0,
+    },
+    {
+        "ticker": "MSFT",
+        "rank": 3,
+        "score": 71.80,
+        "score_quant": 71.80,
+        "enrichment_delta": None,
+        "enrichment_type": None,
+        "enrichment_status": "pending",
+        "signal": "BUY",
+        "confidence": 0.78,
+        "risk_reward_ratio": 3.5,
+        "entry_price": 415.20,
+        "target_price": 466.80,
+        "stop_loss": 398.00,
+        "support_validated": 1,
+        "argument": (
+            "MSFT RSI en 41.3 con divergencia alcista en timeframe diario. MACD cerca "
+            "del cruce positivo — confluencia 2/3. Enrichment auto-screenshot en progreso "
+            "(status=pending): score_enriched aún no disponible."
+        ),
+        "indicators_summary": json.dumps({
+            "macd": "near_crossover",
+            "rsi": 41.3,
+            "volume": 1.12,
+            "support_1": 398.00,
+            "resistance_1": 466.80,
+        }),
+        "expected_gain_per10": 1.36,
+        "expected_loss_per10": 0.40,
+        "expected_value_per10": round(0.35 * 1.36 - 0.65 * 0.40, 2),
+        "hit_rate_used": 0.35,
+        "hit_rate_source": "assumed",
+        "analyzed_at_days_ago": 0,
+        "atr_14_pct": 0.018,
+        "stop_viable": 1,
+    },
+    {
+        "ticker": "NVDA",
+        "rank": 4,
+        "score": 79.40,
+        "score_quant": 79.40,
+        "enrichment_delta": 15.0,  # min(0.87×15 + 2.0, 15) = 15.0 — capped at max
+        "enrichment_type": "auto_screenshot",
+        "enrichment_status": "completed",
+        "signal": "BUY",
+        "confidence": 0.87,
+        "risk_reward_ratio": 3.8,
+        "entry_price": 118.40,
+        "target_price": 145.50,
+        "stop_loss": 110.20,
+        "support_validated": 1,
+        "argument": (
+            "💬 Visual analysis: NVDA breakout confirmado sobre $118.40 con soporte "
+            "validado en $110.20. Delta máximo aplicado (+15.0 pts) por bonus "
+            "support_validated (0.87 × 15 + 2.0 = 15.05, cappado a 15.0). "
+            "Score enriquecido = 94.4."
+        ),
+        "indicators_summary": json.dumps({
+            "macd": "bullish_crossover",
+            "rsi": 42.5,
+            "volume": 1.78,
+            "support_1": 110.20,
+            "resistance_1": 145.50,
+        }),
+        "expected_gain_per10": 1.90,
+        "expected_loss_per10": 0.42,
+        "expected_value_per10": round(0.35 * 1.90 - 0.65 * 0.42, 2),
+        "hit_rate_used": 0.35,
+        "hit_rate_source": "assumed",
+        "analyzed_at_days_ago": 0,
+        "atr_14_pct": 0.028,
+        "stop_viable": 1,
+    },
+    {
+        "ticker": "AAPL",
+        "rank": 5,
+        "score": 71.80,
+        "score_quant": None,   # legacy: no score_quant — shows classic score display
+        "enrichment_delta": None,
+        "enrichment_type": None,
+        "enrichment_status": "none",
+        "signal": "BUY",
+        "confidence": 0.78,
+        "risk_reward_ratio": 3.5,
+        "entry_price": 172.40,
+        "target_price": 195.80,
+        "stop_loss": 165.50,
+        "support_validated": 1,
+        "argument": (
+            "AAPL señal legacy — score_quant no disponible, muestra score clásico. "
+            "RSI 41.3 con divergencia alcista. ⚠ Sin confirmación de outcome tras "
+            "38 días — revisar manualmente."
+        ),
+        "indicators_summary": json.dumps({
+            "macd": "near_crossover",
+            "rsi": 41.3,
+            "volume": 1.12,
+            "support_1": 165.50,
+            "resistance_1": 195.80,
+        }),
+        "expected_gain_per10": 1.36,
+        "expected_loss_per10": 0.40,
+        "expected_value_per10": round(0.35 * 1.36 - 0.65 * 0.40, 2),
+        "hit_rate_used": 0.35,
+        "hit_rate_source": "assumed",
+        "atr_14_pct": None,
+        "stop_viable": None,
+    },
+]
+
 # Historical resolved outcomes seeded in a separate older run.
 # These populate GET /api/analysis/performance with real metrics:
 #   target_hits=1, stop_hits=1, expired=1
@@ -451,50 +652,102 @@ async def init_db() -> None:
                     (str(uuid.uuid4()), DEFAULT_USER_ID, ticker, now),
                 )
 
-            # Seed current run — GOOGL/AMZN fresh + AAPL orphaned (38 days ago)
+            # SEED_SIGNAL_DETAIL=true → use enrichment-showcase seed for US-303 frontend validation
+            use_signal_detail_seed = os.environ.get("SEED_SIGNAL_DETAIL", "").lower() == "true"
+            active_seed = _MOCK_SIGNAL_DETAIL_SEED if use_signal_detail_seed else _MOCK_ANALYSIS_SEED
+
             seed_run_id = str(uuid.uuid4())
-            for row in _MOCK_ANALYSIS_SEED:
+            for row in active_seed:
                 days_ago = row.get("analyzed_at_days_ago", 0)
                 row_ts = (
                     datetime.now(timezone.utc) - timedelta(days=days_ago)
                 ).isoformat()
-                await db.execute(
-                    """
-                    INSERT INTO analysis_results (
-                        id, user_id, run_id, ticker, rank, score, signal, confidence,
-                        risk_reward_ratio, entry_price, target_price, stop_loss,
-                        support_validated, argument, indicators_summary,
-                        screenshot_path, analyzed_at,
-                        expected_gain_per10, expected_loss_per10, expected_value_per10,
-                        hit_rate_used, hit_rate_source, stop_viable, atr_14_pct
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        str(uuid.uuid4()),
-                        DEFAULT_USER_ID,
-                        seed_run_id,
-                        row["ticker"],
-                        row["rank"],
-                        row["score"],
-                        row["signal"],
-                        row["confidence"],
-                        row["risk_reward_ratio"],
-                        row["entry_price"],
-                        row["target_price"],
-                        row["stop_loss"],
-                        row["support_validated"],
-                        row["argument"],
-                        row["indicators_summary"],
-                        row_ts,
-                        row["expected_gain_per10"],
-                        row["expected_loss_per10"],
-                        row["expected_value_per10"],
-                        row["hit_rate_used"],
-                        row["hit_rate_source"],
-                        row.get("stop_viable"),
-                        row.get("atr_14_pct"),
-                    ),
-                )
+                if use_signal_detail_seed:
+                    # All signal-detail rows use now so all land in active tab
+                    await db.execute(
+                        """
+                        INSERT INTO analysis_results (
+                            id, user_id, run_id, ticker, rank, score, signal, confidence,
+                            risk_reward_ratio, entry_price, target_price, stop_loss,
+                            support_validated, argument, indicators_summary,
+                            screenshot_path, analyzed_at,
+                            expected_gain_per10, expected_loss_per10, expected_value_per10,
+                            hit_rate_used, hit_rate_source, stop_viable, atr_14_pct,
+                            score_quant, enrichment_delta, enrichment_type, enrichment_status
+                        ) VALUES (
+                            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?,
+                            ?, ?, ?, ?, ?, ?, ?,
+                            ?, ?, ?, ?
+                        )
+                        """,
+                        (
+                            str(uuid.uuid4()),
+                            DEFAULT_USER_ID,
+                            seed_run_id,
+                            row["ticker"],
+                            row["rank"],
+                            row["score"],
+                            row["signal"],
+                            row["confidence"],
+                            row["risk_reward_ratio"],
+                            row["entry_price"],
+                            row["target_price"],
+                            row["stop_loss"],
+                            row["support_validated"],
+                            row["argument"],
+                            row["indicators_summary"],
+                            now,  # always now — all 5 land in active tab
+                            row["expected_gain_per10"],
+                            row["expected_loss_per10"],
+                            row["expected_value_per10"],
+                            row["hit_rate_used"],
+                            row["hit_rate_source"],
+                            row.get("stop_viable"),
+                            row.get("atr_14_pct"),
+                            row.get("score_quant"),
+                            row.get("enrichment_delta"),
+                            row.get("enrichment_type"),
+                            row.get("enrichment_status", "none"),
+                        ),
+                    )
+                else:
+                    await db.execute(
+                        """
+                        INSERT INTO analysis_results (
+                            id, user_id, run_id, ticker, rank, score, signal, confidence,
+                            risk_reward_ratio, entry_price, target_price, stop_loss,
+                            support_validated, argument, indicators_summary,
+                            screenshot_path, analyzed_at,
+                            expected_gain_per10, expected_loss_per10, expected_value_per10,
+                            hit_rate_used, hit_rate_source, stop_viable, atr_14_pct
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            str(uuid.uuid4()),
+                            DEFAULT_USER_ID,
+                            seed_run_id,
+                            row["ticker"],
+                            row["rank"],
+                            row["score"],
+                            row["signal"],
+                            row["confidence"],
+                            row["risk_reward_ratio"],
+                            row["entry_price"],
+                            row["target_price"],
+                            row["stop_loss"],
+                            row["support_validated"],
+                            row["argument"],
+                            row["indicators_summary"],
+                            row_ts,
+                            row["expected_gain_per10"],
+                            row["expected_loss_per10"],
+                            row["expected_value_per10"],
+                            row["hit_rate_used"],
+                            row["hit_rate_source"],
+                            row.get("stop_viable"),
+                            row.get("atr_14_pct"),
+                        ),
+                    )
 
             # Seed historical resolved run (60 days ago) for performance metrics
             hist_run_id = str(uuid.uuid4())
@@ -546,6 +799,69 @@ async def init_db() -> None:
                 )
 
             await db.commit()
+
+        # SEED_SIGNAL_DETAIL re-seed: runs on existing DBs too, idempotent.
+        # Inserts a fresh run with US-303 enrichment states if the latest run
+        # has no auto_screenshot rows yet.
+        if os.environ.get("SEED_SIGNAL_DETAIL", "").lower() == "true":
+            cursor = await db.execute(
+                "SELECT enrichment_type FROM analysis_results WHERE user_id = ? "
+                "AND enrichment_type = 'auto_screenshot' LIMIT 1",
+                (DEFAULT_USER_ID,),
+            )
+            already_seeded = await cursor.fetchone()
+            if not already_seeded:
+                reseed_run_id = str(uuid.uuid4())
+                reseed_now = datetime.now(timezone.utc).isoformat()
+                for row in _MOCK_SIGNAL_DETAIL_SEED:
+                    row_ts = reseed_now  # all rows timestamped now → freshness="fresh"
+                    await db.execute(
+                        """
+                        INSERT INTO analysis_results (
+                            id, user_id, run_id, ticker, rank, score, signal, confidence,
+                            risk_reward_ratio, entry_price, target_price, stop_loss,
+                            support_validated, argument, indicators_summary,
+                            screenshot_path, analyzed_at,
+                            expected_gain_per10, expected_loss_per10, expected_value_per10,
+                            hit_rate_used, hit_rate_source, stop_viable, atr_14_pct,
+                            score_quant, enrichment_delta, enrichment_type, enrichment_status
+                        ) VALUES (
+                            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?,
+                            ?, ?, ?, ?, ?, ?, ?,
+                            ?, ?, ?, ?
+                        )
+                        """,
+                        (
+                            str(uuid.uuid4()),
+                            DEFAULT_USER_ID,
+                            reseed_run_id,
+                            row["ticker"],
+                            row["rank"],
+                            row["score"],
+                            row["signal"],
+                            row["confidence"],
+                            row["risk_reward_ratio"],
+                            row["entry_price"],
+                            row["target_price"],
+                            row["stop_loss"],
+                            row["support_validated"],
+                            row["argument"],
+                            row["indicators_summary"],
+                            row_ts,
+                            row["expected_gain_per10"],
+                            row["expected_loss_per10"],
+                            row["expected_value_per10"],
+                            row["hit_rate_used"],
+                            row["hit_rate_source"],
+                            row.get("stop_viable"),
+                            row.get("atr_14_pct"),
+                            row.get("score_quant"),
+                            row.get("enrichment_delta"),
+                            row.get("enrichment_type"),
+                            row.get("enrichment_status", "none"),
+                        ),
+                    )
+                await db.commit()
     finally:
         await db.close()
 

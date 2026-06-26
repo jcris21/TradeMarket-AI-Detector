@@ -25,13 +25,17 @@ class ScreenshotAgent:
         the browser via try/finally — even on error.
         """
         async with async_playwright() as pw:
-            browser = await pw.chromium.launch(headless=True)
+            browser = await pw.chromium.launch(
+                headless=True,
+                args=["--ignore-certificate-errors"],
+            )
             try:
-                page = await browser.new_page()
+                context = await browser.new_context(ignore_https_errors=True)
+                page = await context.new_page()
                 try:
                     await page.goto(
                         source_url,
-                        wait_until="networkidle",
+                        wait_until="load",
                         timeout=timeout_ms,
                     )
                 except Exception as exc:

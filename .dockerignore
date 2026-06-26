@@ -16,3 +16,5 @@ planning
 test
 .ruff_cache
 .pytest_cache
+.worktrees
+openspec

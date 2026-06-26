@@ -144,6 +144,15 @@ function RunProgress({
   );
 }
 
+function Spinner() {
+  return (
+    <svg className="animate-spin h-3 w-3 inline-block" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+    </svg>
+  );
+}
+
 /** Score breakdown bar showing quant components + enrichment glow (10.1 / 10.2). */
 function ScoreBreakdownBar({ asset }: { asset: AssetAnalysis }) {
   const sq = asset.score_quant ?? asset.score ?? 0;
@@ -236,6 +245,13 @@ function ScoreBreakdownBar({ asset }: { asset: AssetAnalysis }) {
         <span className="text-gray-400">Adj</span>
         {hasEnrichment && <span style={{ color: "#fbbf24" }}>Enrich</span>}
       </div>
+      {/* 8.1: Pending enrichment indicator */}
+      {asset.enrichment_status === "pending" && !asset.enrichment_delta && (
+        <div className="flex items-center gap-1.5 mt-1">
+          <Spinner />
+          <span className="text-xs font-mono text-amber-400">Enrichment in progress…</span>
+        </div>
+      )}
       {/* 8.2: Render argument as-is (prefix "💬 Visual analysis: " already embedded) */}
       {asset.argument && (
         <p className="mt-2 text-xs text-text-muted font-mono leading-relaxed">{asset.argument}</p>

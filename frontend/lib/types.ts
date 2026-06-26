@@ -115,6 +115,7 @@ export interface AssetAnalysis {
   score_legacy?: number | null;
   enrichment_delta?: number | null;
   enrichment_type?: "trader_chart" | "auto_screenshot" | null;
+  enrichment_status?: "none" | "pending" | "completed" | "failed" | null;
   score_enriched?: number | null;
   rank: number | null;
   rank_exclusion_reason?: string | null;
