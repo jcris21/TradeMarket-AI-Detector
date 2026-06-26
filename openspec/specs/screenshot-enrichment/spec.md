@@ -109,3 +109,14 @@ On successful background task completion, `analysis_tickers.preferred_chart_url`
 #### Scenario: text-only fallback when neither source available
 - **WHEN** `screenshot_bytes=None` and no disk file exists
 - **THEN** VisionAgent proceeds with text-only analysis (existing behavior)
+
+### Requirement: Stale pending jobs reset on startup
+On application startup, all `enrichments` rows with `status IN ('pending', 'processing')` SHALL be updated to `status="failed"` with `error_message="server restarted"`. This prevents phantom pending states after container restart.
+
+#### Scenario: Pending job present on cold start
+- **WHEN** an `enrichments` row has `status="pending"` and the server restarts
+- **THEN** on next startup that row's status is set to `"failed"` with `error_message="server restarted"`
+
+#### Scenario: No stale jobs on startup
+- **WHEN** no pending or processing enrichment rows exist
+- **THEN** startup completes without modifying any enrichment rows

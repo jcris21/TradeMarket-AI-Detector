@@ -62,5 +62,5 @@
 ## 9. Integration & Verification
 
 - [x] 9.1 Run full test suite (`uv run pytest`) — all tests green
-- [ ] 9.2 Build Docker image and verify `playwright install chromium` succeeds inside container
-- [ ] 9.3 Manual smoke test: POST screenshot enrichment → 202 → poll GET until `enrichment_status="completed"` → verify `enrichment_delta` non-null and `preferred_chart_url` set
+- [x] 9.2 Build Docker image and verify `playwright install chromium` succeeds inside container
+- [x] 9.3 Manual smoke test: POST screenshot enrichment → 202 → poll GET until `enrichment_status="completed"` → verify `enrichment_delta` non-null and `preferred_chart_url` set
