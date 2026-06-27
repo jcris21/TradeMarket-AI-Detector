@@ -1097,7 +1097,12 @@ tags:
 # Returns the most recent analysis run results plus run-level metadata.
 #
 # Response shape:
-#   results       array    — ordered by rank; each item is AssetAnalysisWithFreshness (see below)
+#   results          array    — all rows from the most recent run ordered by rank
+#   top_n            array    — filtered subset: only rows where rank IS NOT NULL,
+#                               same item shape as `results`. Up to ANALYSIS_TOP_N items
+#                               (default 20). Deprecated `top_5` alias equals `top_n`.
+#   total_analyzed   integer  — count of all assets passed through scoring in this run
+#                               (before top-N filtering). 0 when no run has completed.
 #   run_metadata  object | null
 #     run_id              string  — UUID of the most recent run
 #     analyzed_at         string  — ISO 8601 UTC timestamp of run completion
@@ -1153,6 +1158,10 @@ tags:
 #                                     runs; never re-sorts the ranking list.
 #   score_enriched    number | null — derived: score_quant + enrichment_delta. Computed at
 #                                     read time, not stored. NULL when enrichment_delta is NULL.
+#   prior_score_quant number | null — score_quant for this ticker from the immediately preceding
+#                                     completed run. NULL when no prior run exists or the ticker
+#                                     was not analysed in the prior run. Only populated on items
+#                                     in top_n; NULL for unranked rows in results.
 #
 # NOTE for back-test scripts: read `score_quant` (not `score`) as the canonical ranking
 # field. `score` remains for backward compat but is now an alias for `score_quant`.

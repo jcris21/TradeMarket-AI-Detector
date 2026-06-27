@@ -440,6 +440,49 @@ async def save_analysis_results(
     return write_errors
 
 
+async def get_prior_scores(run_id: str, user_id: str = DEFAULT_USER_ID) -> dict[str, float]:
+    """Return {ticker: score_quant} from the run immediately before run_id.
+
+    Finds the last completed run whose analyzed_at precedes the current run's
+    analyzed_at, then returns score_quant for each ticker in that prior run.
+    Returns {} when no prior run exists or on any DB error.
+    """
+    db = await get_connection()
+    try:
+        cur = await db.execute(
+            "SELECT MIN(analyzed_at) AS run_start FROM analysis_results "
+            "WHERE user_id = ? AND run_id = ?",
+            (user_id, run_id),
+        )
+        row = await cur.fetchone()
+        if not row or not row["run_start"]:
+            return {}
+        current_run_start = row["run_start"]
+
+        cur = await db.execute(
+            "SELECT run_id FROM analysis_results WHERE user_id = ? AND run_id != ? "
+            "GROUP BY run_id HAVING MAX(analyzed_at) < ? "
+            "ORDER BY MAX(analyzed_at) DESC LIMIT 1",
+            (user_id, run_id, current_run_start),
+        )
+        prior_row = await cur.fetchone()
+        if not prior_row:
+            return {}
+        prior_run_id = prior_row["run_id"]
+
+        cur = await db.execute(
+            "SELECT ticker, score_quant FROM analysis_results "
+            "WHERE user_id = ? AND run_id = ?",
+            (user_id, prior_run_id),
+        )
+        rows = await cur.fetchall()
+        return {r["ticker"]: r["score_quant"] for r in rows if r["score_quant"] is not None}
+    except aiosqlite.OperationalError:
+        return {}
+    finally:
+        await db.close()
+
+
 async def update_outcome_atomic(
     signal_id: str,
     outcome: str,

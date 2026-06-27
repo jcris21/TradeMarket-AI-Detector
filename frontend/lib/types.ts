@@ -131,6 +131,7 @@ export interface AssetAnalysis {
   atr_14_pct?: number | null;
   stop_viable?: boolean | null;
   is_stale?: boolean;
+  prior_score_quant?: number | null;
 }
 
 /** Response from POST /api/analysis/run (202 Accepted) */
@@ -158,6 +159,8 @@ export interface RunStatus {
 /** Response from GET /api/analysis/latest */
 export interface AnalysisLatestResponse {
   results: AssetAnalysis[];
+  top_n?: AssetAnalysis[];
+  total_analyzed?: number;
 }
 
 /** Response from GET /api/analysis/latest?partial=true (US-204) */

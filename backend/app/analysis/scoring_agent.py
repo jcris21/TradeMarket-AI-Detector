@@ -397,7 +397,7 @@ def score_and_rank_with_errors(
     if min_rr is None:
         min_rr = float(os.environ.get("ANALYSIS_MIN_RR_RATIO", "3.0"))
     if top_n is None:
-        top_n = int(os.environ.get("ANALYSIS_TOP_N", "5"))
+        top_n = max(5, min(20, int(os.environ.get("ANALYSIS_TOP_N", "20"))))
 
     _prior = prior_scores or {}
     scored: list[AssetAnalysis] = []

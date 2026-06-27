@@ -35,6 +35,7 @@ from app.db import (
     get_enrichment_job,
     get_latest_analysis,
     get_performance_summary,
+    get_prior_scores,
     remove_analysis_ticker,
     set_analysis_enrichment_status,
     set_ticker_preferred_url,
@@ -147,7 +148,18 @@ async def get_latest(partial: bool = Query(False)):
         return {"results": ranked[:_PARTIAL_TOP_N], "partial": True}
 
     rows = await get_latest_analysis()
-    return {"results": rows}
+    top_n = [r for r in rows if r.get("rank") is not None]
+    total_analyzed = len(rows)
+
+    # Inject prior_score_quant onto each top_n item (P1 / US-404)
+    if top_n and rows:
+        run_id = rows[0].get("run_id")
+        if run_id:
+            prior_scores = await get_prior_scores(run_id)
+            for item in top_n:
+                item["prior_score_quant"] = prior_scores.get(item["ticker"])
+
+    return {"results": rows, "top_n": top_n, "total_analyzed": total_analyzed}
 
 
 @router.get("/tickers")

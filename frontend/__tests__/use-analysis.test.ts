@@ -35,6 +35,23 @@ afterEach(() => {
   jest.useRealTimers();
 });
 
+describe("useAnalysis totalAnalyzed (US-401)", () => {
+  it("exposes totalAnalyzed from API response", async () => {
+    getLatestAnalysis.mockResolvedValue({ results: [{ ticker: "AAPL", analyzed_at: new Date().toISOString() }], total_analyzed: 42 });
+
+    const { result } = renderHook(() => useAnalysis());
+    await waitFor(() => expect(result.current.totalAnalyzed).toBe(42));
+  });
+
+  it("defaults totalAnalyzed to 0 when field absent", async () => {
+    getLatestAnalysis.mockResolvedValue({ results: [] });
+
+    const { result } = renderHook(() => useAnalysis());
+    await waitFor(() => expect(result.current.status).toBeDefined());
+    expect(result.current.totalAnalyzed).toBe(0);
+  });
+});
+
 describe("useAnalysis polling (US-204 8.7)", () => {
   it("stops polling when stage becomes complete", async () => {
     startAnalysisRun.mockResolvedValue({

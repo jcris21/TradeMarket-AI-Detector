@@ -20,6 +20,7 @@ const POLL_INTERVAL_MS = 3000;
 interface UseAnalysisReturn {
   results: AssetAnalysis[];
   top5: AssetAnalysis[];
+  totalAnalyzed: number;
   status: AnalysisStatus;
   runStatus: RunStatus | null;
   previewResults: AssetAnalysis[];
@@ -36,6 +37,7 @@ interface UseAnalysisReturn {
 
 export function useAnalysis(): UseAnalysisReturn {
   const [results, setResults] = useState<AssetAnalysis[]>([]);
+  const [totalAnalyzed, setTotalAnalyzed] = useState<number>(0);
   const [status, setStatus] = useState<AnalysisStatus>("idle");
   const [runStatus, setRunStatus] = useState<RunStatus | null>(null);
   const [previewResults, setPreviewResults] = useState<AssetAnalysis[]>([]);
@@ -57,10 +59,11 @@ export function useAnalysis(): UseAnalysisReturn {
   // Load cached results on mount
   useEffect(() => {
     getLatestAnalysis()
-      .then(({ results: rows }) => {
+      .then(({ results: rows, total_analyzed }) => {
         if (rows.length > 0) {
           setResults(rows);
           setLastAnalyzedAt(rows[0].analyzed_at ?? null);
+          setTotalAnalyzed(total_analyzed ?? 0);
           setStatus("done");
         }
       })
@@ -72,9 +75,10 @@ export function useAnalysis(): UseAnalysisReturn {
 
   const finishRun = useCallback(async () => {
     try {
-      const { results: rows } = await getLatestAnalysis();
+      const { results: rows, total_analyzed } = await getLatestAnalysis();
       setResults(rows);
       setLastAnalyzedAt(rows[0]?.analyzed_at ?? null);
+      setTotalAnalyzed(total_analyzed ?? 0);
     } catch {
       // Ignore — keep whatever results we already have
     }
@@ -162,6 +166,7 @@ export function useAnalysis(): UseAnalysisReturn {
   return {
     results,
     top5,
+    totalAnalyzed,
     status,
     runStatus,
     previewResults,

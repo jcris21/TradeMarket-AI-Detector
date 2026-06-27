@@ -34,6 +34,7 @@ Public API:
     get_latest_analysis     - Get most recent analysis run results
     get_analysis_by_ticker  - Get latest analysis for a specific ticker
     get_performance_summary - Compute aggregated outcome metrics
+    get_prior_scores        - Get {ticker: score_quant} from the run before a given run_id
 
     create_enrichment_job              - Insert a new enrichment job row
     get_enrichment_job                 - Fetch an enrichment job by id
@@ -64,6 +65,7 @@ from .repository import (
     get_latest_analysis,
     get_performance_summary,
     get_portfolio_history,
+    get_prior_scores,
     get_position,
     get_positions,
     get_watchlist,
@@ -109,6 +111,7 @@ __all__ = [
     "get_analysis_tickers",
     "get_analysis_by_ticker",
     "get_latest_analysis",
+    "get_prior_scores",
     "remove_analysis_ticker",
     "save_analysis_results",
     "update_outcome_atomic",

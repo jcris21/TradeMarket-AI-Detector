@@ -760,3 +760,101 @@ def test_existing_top_n_still_applied_after_sector_cap(monkeypatch):
 
     assert len([a for a in ranked if a.rank is not None]) == 5
 
+
+# ── US-401: ANALYSIS_TOP_N=20 default and top_5 alias (task 8.2) ──────────────
+
+def test_analysis_top_n_default_returns_up_to_20(monkeypatch):
+    """ANALYSIS_TOP_N default=20: scoring returns up to 20 results."""
+    monkeypatch.delenv("ANALYSIS_TOP_N", raising=False)
+    # Create 25 qualifying assets
+    assets = [_make_analysis(f"T{i}", rr_ratio=3.0 + (i % 5) * 0.1) for i in range(25)]
+    ranked, _errors, _excl = score_and_rank_with_errors(assets, min_rr=3.0)
+    qualifiers = [a for a in ranked if a.rank is not None]
+    assert len(qualifiers) == 20
+
+
+def test_analysis_top_n_clamp_above_20(monkeypatch):
+    """ANALYSIS_TOP_N=50 is clamped to 20."""
+    monkeypatch.setenv("ANALYSIS_TOP_N", "50")
+    assets = [_make_analysis(f"T{i}", rr_ratio=3.0) for i in range(25)]
+    ranked, _errors, _excl = score_and_rank_with_errors(assets, min_rr=3.0)
+    qualifiers = [a for a in ranked if a.rank is not None]
+    assert len(qualifiers) == 20
+
+
+def test_analysis_top_n_clamp_below_5(monkeypatch):
+    """ANALYSIS_TOP_N=2 is clamped to 5."""
+    monkeypatch.setenv("ANALYSIS_TOP_N", "2")
+    assets = [_make_analysis(f"T{i}", rr_ratio=3.0) for i in range(10)]
+    ranked, _errors, _excl = score_and_rank_with_errors(assets, min_rr=3.0)
+    qualifiers = [a for a in ranked if a.rank is not None]
+    assert len(qualifiers) == 5
+
+
+# ── US-404: get_prior_scores in repository (task 8.1) ─────────────────────────
+
+@pytest.mark.asyncio
+async def test_repository_get_prior_scores_returns_correct_dict():
+    """get_prior_scores() returns {ticker: score_quant} for known prior run."""
+    import aiosqlite
+    from app.db.repository import get_prior_scores
+    from unittest.mock import patch
+
+    db = await aiosqlite.connect(":memory:")
+    db.row_factory = aiosqlite.Row
+    await db.execute(
+        "CREATE TABLE analysis_results "
+        "(id TEXT, user_id TEXT, run_id TEXT, ticker TEXT, score_quant REAL, analyzed_at TEXT)"
+    )
+    # Prior run (older timestamp)
+    await db.execute(
+        "INSERT INTO analysis_results VALUES ('1', 'default', 'run-prior', 'AAPL', 65.0, '2026-01-01T10:00:00')"
+    )
+    await db.execute(
+        "INSERT INTO analysis_results VALUES ('2', 'default', 'run-prior', 'MSFT', 72.0, '2026-01-01T10:00:00')"
+    )
+    # Current run (newer timestamp)
+    await db.execute(
+        "INSERT INTO analysis_results VALUES ('3', 'default', 'run-current', 'AAPL', 70.0, '2026-01-02T10:00:00')"
+    )
+    await db.commit()
+
+    # Patch get_connection to return our in-memory db
+    async def _get_conn():
+        return db
+
+    with patch("app.db.repository.get_connection", _get_conn):
+        result = await get_prior_scores("run-current")
+
+    await db.close()
+    assert result == {"AAPL": 65.0, "MSFT": 72.0}
+
+
+@pytest.mark.asyncio
+async def test_repository_get_prior_scores_returns_empty_when_no_prior():
+    """get_prior_scores() returns {} when no prior run exists."""
+    import aiosqlite
+    from app.db.repository import get_prior_scores
+    from unittest.mock import patch
+
+    db = await aiosqlite.connect(":memory:")
+    db.row_factory = aiosqlite.Row
+    await db.execute(
+        "CREATE TABLE analysis_results "
+        "(id TEXT, user_id TEXT, run_id TEXT, ticker TEXT, score_quant REAL, analyzed_at TEXT)"
+    )
+    # Only one run — no prior
+    await db.execute(
+        "INSERT INTO analysis_results VALUES ('1', 'default', 'run-only', 'AAPL', 65.0, '2026-01-01T10:00:00')"
+    )
+    await db.commit()
+
+    async def _get_conn():
+        return db
+
+    with patch("app.db.repository.get_connection", _get_conn):
+        result = await get_prior_scores("run-only")
+
+    await db.close()
+    assert result == {}
+

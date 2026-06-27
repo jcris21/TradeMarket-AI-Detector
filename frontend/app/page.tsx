@@ -38,6 +38,7 @@ export default function Home() {
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
   const [userSelectedTicker, setUserSelectedTicker] = useState<string | null>(null);
   const [chatInjectedMessage, setChatInjectedMessage] = useState<string | null>(null);
+  const [oppsExpanded, setOppsExpanded] = useState(false);
 
   // Derive the effective selected ticker: user selection, or first watchlist item
   const selectedTicker = useMemo(() => {
@@ -90,7 +91,7 @@ export default function Home() {
         </div>
 
         {/* Center: Charts + Positions */}
-        <div className="flex-1 flex flex-col min-w-0">
+        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
           {/* Top row: Price Chart + Portfolio Heatmap */}
           <div className="flex-1 flex min-h-0">
             <div className="flex-[2] border-r border-border min-w-0">
@@ -102,15 +103,29 @@ export default function Home() {
           </div>
 
           {/* Opportunities Panel */}
-          <div className="h-[264px] border-t border-border shrink-0">
+          <div
+            className={
+              oppsExpanded
+                ? "flex-1 min-h-0 border-t border-border overflow-hidden"
+                : "h-[264px] border-t border-border shrink-0"
+            }
+          >
             <OpportunitiesPanel
               onTickerSelect={setUserSelectedTicker}
               onInjectChat={setChatInjectedMessage}
+              isExpanded={oppsExpanded}
+              onExpandToggle={() => setOppsExpanded((p) => !p)}
             />
           </div>
 
-          {/* Bottom row: Positions + P&L Chart */}
-          <div className="h-[35%] flex border-t border-border min-h-0">
+          {/* Bottom row: Positions + P&L Chart — hidden when Opportunities is expanded */}
+          <div
+            className={
+              oppsExpanded
+                ? "hidden"
+                : "h-[35%] flex border-t border-border min-h-0 shrink-0"
+            }
+          >
             <div className="flex-1 border-r border-border min-w-0">
               <PositionsTable positions={portfolio?.positions ?? []} />
             </div>

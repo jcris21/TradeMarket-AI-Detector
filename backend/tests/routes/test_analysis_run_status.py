@@ -142,3 +142,27 @@ async def test_partial_caps_at_20(analysis_client):
     run_registry.register_run(state)
     resp = await analysis_client.get("/api/analysis/latest?partial=true")
     assert len(resp.json()["results"]) == 20
+
+
+async def test_latest_response_includes_total_analyzed_and_top_n(analysis_client, test_db, monkeypatch):
+    """GET /api/analysis/latest returns total_analyzed and top_n fields (US-401 task 8.3)."""
+    from unittest.mock import AsyncMock, patch
+
+    # Fake latest analysis returning 3 rows: 2 ranked + 1 unranked
+    fake_rows = [
+        {"ticker": "AAPL", "rank": 1, "score_quant": 80.0, "run_id": "r1"},
+        {"ticker": "MSFT", "rank": 2, "score_quant": 70.0, "run_id": "r1"},
+        {"ticker": "TSLA", "rank": None, "score_quant": 40.0, "run_id": "r1"},
+    ]
+
+    with (
+        patch("app.routes.analysis.get_latest_analysis", new=AsyncMock(return_value=fake_rows)),
+        patch("app.routes.analysis.get_prior_scores", new=AsyncMock(return_value={})),
+    ):
+        resp = await analysis_client.get("/api/analysis/latest")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total_analyzed"] == 3
+    assert len(body["top_n"]) == 2
+    assert {r["ticker"] for r in body["top_n"]} == {"AAPL", "MSFT"}

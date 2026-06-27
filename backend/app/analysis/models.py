@@ -108,7 +108,10 @@ class AnalysisResult(BaseModel):
     run_id: str
     analyzed_at: str
     assets: list[AssetAnalysis]   # all analyzed (ranked + unranked)
-    top_5: list[AssetAnalysis]    # filtered and sorted Top N
+    top_n: list[AssetAnalysis] = []   # canonical top-N results
+    # TODO Sprint 6: remove top_5 alias once E2E tests are updated
+    top_5: list[AssetAnalysis] = []   # deprecated alias for top_n
+    total_analyzed: int = 0
     errors: list[dict]            # [{ticker, error_message, reason}]
     duration_seconds: float
     stale_tickers: list[str] = []
