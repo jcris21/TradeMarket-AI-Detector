@@ -187,6 +187,11 @@ export async function getPerformanceSummary(): Promise<PerformanceSummary> {
   return request<PerformanceSummary>("/analysis/performance");
 }
 
+export async function getOutcomesHistory(): Promise<AssetAnalysis[]> {
+  const data = await request<{ outcomes: AssetAnalysis[]; total: number }>("/analysis/outcomes");
+  return data.outcomes;
+}
+
 export async function enrichTraderChart(
   ticker: string,
   chartImageB64: string

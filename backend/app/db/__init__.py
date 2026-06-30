@@ -32,6 +32,7 @@ Public API:
     update_outcome_atomic   - Atomically write outcome for a signal (idempotent)
     update_enrichment_delta - Set post-hoc enrichment_delta for a ticker in a run
     get_latest_analysis     - Get most recent analysis run results
+    get_outcomes_history    - Get all ranked signals with resolved outcomes (cross-run)
     get_analysis_by_ticker  - Get latest analysis for a specific ticker
     get_performance_summary - Compute aggregated outcome metrics
     get_prior_scores        - Get {ticker: score_quant} from the run before a given run_id
@@ -63,6 +64,7 @@ from .repository import (
     get_chat_history,
     get_enrichment_job,
     get_latest_analysis,
+    get_outcomes_history,
     get_performance_summary,
     get_portfolio_history,
     get_prior_scores,
@@ -111,6 +113,7 @@ __all__ = [
     "get_analysis_tickers",
     "get_analysis_by_ticker",
     "get_latest_analysis",
+    "get_outcomes_history",
     "get_prior_scores",
     "remove_analysis_ticker",
     "save_analysis_results",

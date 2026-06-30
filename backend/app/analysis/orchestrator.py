@@ -6,8 +6,6 @@ import os
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
-
 import yfinance as yf
 
 from app.db import get_connection, save_analysis_results
@@ -15,9 +13,9 @@ from app.db.repository import get_analysis_by_ticker
 
 from .data_agent import fetch_indicators_batch
 from .models import AnalysisResult, AssetAnalysis, TechnicalIndicators
+from .quant_agent import quant_analyze
 from .run_registry import RunState
 from .scoring_agent import _get_hit_rate, _get_prior_scores, score_and_rank_with_errors
-from .vision_agent import analyze_asset
 
 logger = logging.getLogger(__name__)
 
@@ -238,48 +236,33 @@ async def run_analysis(
     if state is not None:
         state.stage = "scoring"
 
-    # Stage 2: Load pre-captured screenshots from the screenshots folder
+    # Stage 2: (skipped) Screenshots are loaded only via the enrichment endpoint,
+    # not in the automated batch pipeline (no LLM vision calls here).
     t2 = time.monotonic()
-    screenshots_dir = Path(__file__).parents[3] / "screenshots"
-    screenshots: dict[str, bytes | None] = {}
-    for ticker in successful:
-        png = screenshots_dir / f"{ticker}.png"
-        screenshots[ticker] = png.read_bytes() if png.exists() else None
-    loaded = sum(1 for v in screenshots.values() if v is not None)
     logger.info("stage_complete", extra={
         "stage": 2, "run_id": run_id,
-        "duration_ms": int((time.monotonic() - t2) * 1000),
+        "duration_ms": 0,
         "tickers_total": len(successful),
-        "tickers_ok": loaded,
-        "tickers_error": len(successful) - loaded,
+        "tickers_ok": 0,
+        "tickers_error": 0,
+        "note": "screenshot_stage_skipped_automated_pipeline",
     })
 
-    # Stage 3: Parallel vision analysis
+    # Stage 3: Pure quantitative analysis — no LLM calls.
+    # Vision analysis (analyze_asset) is reserved for the enrichment endpoint
+    # when a trader uploads a chart or triggers auto-screenshot enrichment.
     t3 = time.monotonic()
-
-    async def _vision_one(ticker: str) -> AssetAnalysis:
-        indicators = successful[ticker]
-        screenshot = screenshots.get(ticker)
-        return await analyze_asset(indicators, screenshot_bytes=screenshot)
-
     ticker_list = list(successful.keys())
-    vision_tasks = [_vision_one(t) for t in ticker_list]
-    vision_results = await asyncio.gather(*vision_tasks, return_exceptions=True)
     raw_analyses: list[AssetAnalysis] = []
-    vision_errors = 0
-    for ticker, res in zip(ticker_list, vision_results):
-        if isinstance(res, Exception):
-            errors.append({"ticker": ticker, "error_message": str(res)})
-            vision_errors += 1
-        else:
-            raw_analyses.append(res)
-    ticker_list = [t for t, r in zip(ticker_list, vision_results) if not isinstance(r, Exception)]
+    for ticker in ticker_list:
+        raw_analyses.append(quant_analyze(successful[ticker]))
     logger.info("stage_complete", extra={
         "stage": 3, "run_id": run_id,
         "duration_ms": int((time.monotonic() - t3) * 1000),
         "tickers_total": len(successful),
         "tickers_ok": len(raw_analyses),
-        "tickers_error": vision_errors,
+        "tickers_error": 0,
+        "mode": "quant_only",
     })
 
     # Inject ATR + SMA-50 + Bollinger Band values from Stage-1 indicators

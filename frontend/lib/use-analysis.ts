@@ -5,6 +5,7 @@ import {
   addAnalysisTicker,
   getLatestAnalysis,
   getLatestPartial,
+  getOutcomesHistory,
   getRunStatus,
   getTickerAnalysis,
   RunInProgressError,
@@ -20,6 +21,7 @@ const POLL_INTERVAL_MS = 3000;
 interface UseAnalysisReturn {
   results: AssetAnalysis[];
   top5: AssetAnalysis[];
+  outcomes: AssetAnalysis[];
   totalAnalyzed: number;
   status: AnalysisStatus;
   runStatus: RunStatus | null;
@@ -37,6 +39,7 @@ interface UseAnalysisReturn {
 
 export function useAnalysis(): UseAnalysisReturn {
   const [results, setResults] = useState<AssetAnalysis[]>([]);
+  const [outcomes, setOutcomes] = useState<AssetAnalysis[]>([]);
   const [totalAnalyzed, setTotalAnalyzed] = useState<number>(0);
   const [status, setStatus] = useState<AnalysisStatus>("idle");
   const [runStatus, setRunStatus] = useState<RunStatus | null>(null);
@@ -56,7 +59,7 @@ export function useAnalysis(): UseAnalysisReturn {
     }
   }, []);
 
-  // Load cached results on mount
+  // Load cached results and outcomes on mount
   useEffect(() => {
     getLatestAnalysis()
       .then(({ results: rows, total_analyzed }) => {
@@ -70,6 +73,11 @@ export function useAnalysis(): UseAnalysisReturn {
       .catch(() => {
         // No cached results yet — stay idle
       });
+
+    getOutcomesHistory()
+      .then((rows) => setOutcomes(rows))
+      .catch(() => { /* No outcomes yet */ });
+
     return stopPolling;
   }, [stopPolling]);
 
@@ -81,6 +89,12 @@ export function useAnalysis(): UseAnalysisReturn {
       setTotalAnalyzed(total_analyzed ?? 0);
     } catch {
       // Ignore — keep whatever results we already have
+    }
+    try {
+      const rows = await getOutcomesHistory();
+      setOutcomes(rows);
+    } catch {
+      // Ignore — keep existing outcomes
     }
     setStatus("done");
   }, []);
@@ -166,6 +180,7 @@ export function useAnalysis(): UseAnalysisReturn {
   return {
     results,
     top5,
+    outcomes,
     totalAnalyzed,
     status,
     runStatus,

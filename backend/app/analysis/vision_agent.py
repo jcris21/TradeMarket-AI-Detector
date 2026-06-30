@@ -14,8 +14,7 @@ from .models import AssetAnalysis, ExtractedLevel, TechnicalIndicators
 logger = logging.getLogger(__name__)
 
 MODEL_VISION = "openrouter/openai/gpt-4o"
-MODEL_TEXT = "openrouter/openai/gpt-oss-120b"
-EXTRA_BODY_TEXT = {"provider": {"order": ["cerebras"]}}
+MODEL_TEXT = "openrouter/openai/gpt-4o-mini"
 
 LEVEL_EXTRACTION_PROMPT = (
     "Analyze this trading chart and identify key support and resistance price levels. "
@@ -138,15 +137,14 @@ async def _call_llm(messages: list[dict], use_vision: bool) -> str:
             completion,
             model=MODEL_VISION,
             messages=messages,
-            max_tokens=1024,
+            max_tokens=400,
         )
     else:
         response = await asyncio.to_thread(
             completion,
             model=MODEL_TEXT,
             messages=messages,
-            max_tokens=1024,
-            extra_body=EXTRA_BODY_TEXT,
+            max_tokens=300,
         )
     return response.choices[0].message.content
 

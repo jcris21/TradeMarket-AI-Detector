@@ -268,7 +268,10 @@ def _compute_score_quant(asset: AssetAnalysis, atr_viability_pts: float = 0.0) -
 
 
 def _compute_bet_size(asset: AssetAnalysis, hit_rate: float, source: str) -> AssetAnalysis:
-    """Return asset with expected_gain_per10, expected_loss_per10, expected_value_per10 populated."""
+    """Return asset with expected_gain_per10, expected_loss_per10, expected_value_per10 populated.
+
+    Fields are named *_per10 for historical reasons; values now represent outcomes per $100 risked.
+    """
     entry = asset.entry_price
     if entry <= 0:
         return asset.model_copy(update={
@@ -278,8 +281,8 @@ def _compute_bet_size(asset: AssetAnalysis, hit_rate: float, source: str) -> Ass
             "hit_rate_used": hit_rate,
             "hit_rate_source": source,
         })
-    gain = round(10 * (asset.target_price - entry) / entry, 2)
-    loss = round(10 * (entry - asset.stop_loss) / entry, 2)
+    gain = round(100 * (asset.target_price - entry) / entry, 2)
+    loss = round(100 * (entry - asset.stop_loss) / entry, 2)
     ev = round(hit_rate * gain - (1 - hit_rate) * loss, 2)
     return asset.model_copy(update={
         "expected_gain_per10": gain,

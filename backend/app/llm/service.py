@@ -26,8 +26,7 @@ from .models import LlmResponse
 
 logger = logging.getLogger(__name__)
 
-MODEL = "openrouter/openai/gpt-oss-120b"
-EXTRA_BODY = {"provider": {"order": ["cerebras"]}}
+MODEL = os.environ.get("LLM_MODEL", "groq/llama-3.3-70b-versatile")
 
 SYSTEM_PROMPT = """You are FinAlly, an AI trading assistant for a simulated trading workstation.
 
@@ -43,7 +42,17 @@ Rules:
 - Be concise and data-driven
 - When the user asks you to trade, include the trade in your response
 - When suggesting trades, explain your reasoning briefly
-- Always respond with valid structured JSON matching the required schema"""
+
+CRITICAL: You MUST respond with ONLY valid JSON in exactly this structure — no prose, no markdown:
+{
+  "message": "Your conversational response here",
+  "trades": [{"ticker": "AAPL", "side": "buy", "quantity": 10}],
+  "watchlist_changes": [{"ticker": "PYPL", "action": "add"}]
+}
+- "trades" and "watchlist_changes" must be empty arrays [] if none.
+- "ticker" is always the stock symbol (e.g. "AAPL"). Never use "symbol".
+- "side" is exactly "buy" or "sell".
+- "action" is exactly "add" or "remove"."""
 
 
 async def _build_context(price_cache: PriceCache) -> dict:
@@ -239,8 +248,7 @@ async def chat_with_llm(user_message: str, price_cache: PriceCache) -> dict:
         response = await acompletion(
             model=MODEL,
             messages=messages,
-            response_format=LlmResponse,
-            extra_body=EXTRA_BODY,
+            response_format={"type": "json_object"},
         )
         content = response.choices[0].message.content
         llm_response = LlmResponse.model_validate_json(content)

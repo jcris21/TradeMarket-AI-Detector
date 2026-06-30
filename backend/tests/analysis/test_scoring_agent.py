@@ -113,8 +113,8 @@ def test_valid_asset_guardrail_regression_preserves_scoring_bet_size_and_delta()
     assert result.rank == 1
     assert result.score is not None
     assert result.score_delta == round(result.score - 60.0, 2)
-    assert result.expected_gain_per10 == 3.0
-    assert result.expected_loss_per10 == 1.0
+    assert result.expected_gain_per10 == 30.0
+    assert result.expected_loss_per10 == 10.0
     assert result.expected_value_per10 is not None
     assert result.hit_rate_used == 0.35
     assert result.hit_rate_source == "assumed"
@@ -224,9 +224,9 @@ def _make_asset(entry: float, target: float, stop: float) -> AssetAnalysis:
 @pytest.mark.parametrize(
     "entry,target,stop,expected_gain,expected_loss",
     [
-        (100.0, 130.0, 90.0, 3.0, 1.0),   # test_bet_size_rr_3
-        (100.0, 120.0, 90.0, 2.0, 1.0),   # test_bet_size_rr_2
-        (100.0, 160.0, 90.0, 6.0, 1.0),   # test_bet_size_rr_6
+        (100.0, 130.0, 90.0, 30.0, 10.0),   # test_bet_size_rr_3
+        (100.0, 120.0, 90.0, 20.0, 10.0),   # test_bet_size_rr_2
+        (100.0, 160.0, 90.0, 60.0, 10.0),   # test_bet_size_rr_6
     ],
     ids=["rr_3", "rr_2", "rr_6"],
 )

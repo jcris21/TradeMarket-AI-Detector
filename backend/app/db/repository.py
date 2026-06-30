@@ -18,12 +18,12 @@ FRESHNESS_THRESHOLDS = {"fresh": 2.0, "active": 5.0, "aged": 24.0}
 def _compute_phase(conclusive: int) -> tuple[int, str]:
     """Map a conclusive-signal count to a (phase, banner) tuple."""
     if conclusive < 30:
-        return 0, f"📊 Phase 0: Calibration — {conclusive}/30 signals · Metrics unlocked at 30"
+        return 0, f"📊 Fase 0: Calibración — {conclusive}/30 trades resueltos · Métricas disponibles al completar"
     if conclusive < 100:
-        return 1, f"📊 Phase 1: Pilot — {conclusive}/100 signals · Begin paper trading"
+        return 1, f"📊 Fase 1: Piloto — {conclusive}/100 trades resueltos · Paper trading recomendado"
     if conclusive < 300:
-        return 2, f"📊 Phase 2: Evaluation — {conclusive}/300 signals · Small real capital OK"
-    return 3, f"📊 Phase 3: Confident — {conclusive} signals · Normal allocation"
+        return 2, f"📊 Fase 2: Evaluación — {conclusive}/300 trades resueltos · Capital real pequeño OK"
+    return 3, f"📊 Fase 3: Confianza — {conclusive} trades resueltos · Asignación normal"
 
 
 def compute_freshness(analyzed_at: str) -> dict:
@@ -709,6 +709,22 @@ async def get_latest_analysis(user_id: str = DEFAULT_USER_ID) -> list[dict]:
             "SELECT * FROM analysis_results WHERE user_id = ? AND run_id = ? "
             "ORDER BY CASE WHEN rank IS NULL THEN 999 ELSE rank END",
             (user_id, run_id),
+        )
+        rows = await cursor.fetchall()
+        return [_parse_analysis_row(r) for r in rows]
+    finally:
+        await db.close()
+
+
+async def get_outcomes_history(user_id: str = DEFAULT_USER_ID) -> list[dict]:
+    """Return all ranked signals with a resolved outcome, newest first."""
+    db = await get_connection()
+    try:
+        cursor = await db.execute(
+            "SELECT * FROM analysis_results "
+            "WHERE user_id = ? AND outcome IS NOT NULL AND rank IS NOT NULL "
+            "ORDER BY analyzed_at DESC",
+            (user_id,),
         )
         rows = await cursor.fetchall()
         return [_parse_analysis_row(r) for r in rows]

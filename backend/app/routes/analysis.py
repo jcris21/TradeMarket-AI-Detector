@@ -34,6 +34,7 @@ from app.db import (
     get_analysis_tickers,
     get_enrichment_job,
     get_latest_analysis,
+    get_outcomes_history,
     get_performance_summary,
     get_prior_scores,
     remove_analysis_ticker,
@@ -193,6 +194,13 @@ async def remove_ticker(ticker: str):
 async def get_performance():
     """Return aggregated outcome performance metrics."""
     return await get_performance_summary()
+
+
+@router.get("/outcomes")
+async def get_outcomes():
+    """Return all ranked signals with resolved outcomes across all runs, newest first."""
+    rows = await get_outcomes_history()
+    return {"outcomes": rows, "total": len(rows)}
 
 
 @router.get("/debug/extract-levels-last")

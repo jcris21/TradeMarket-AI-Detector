@@ -4,7 +4,8 @@
       "PowerShell(& \"E:\\\\FILES 2026\\\\MVP_VIBECODE+AGENTIC\\\\finally\\\\backend\\\\.venv\\\\Scripts\\\\python.exe\" -m pip show aiohttp 2>&1)",
       "PowerShell(netstat *)",
       "Bash(python -m pytest tests/ -x --tb=short)",
-      "Bash(python -m ruff check .)"
+      "Bash(python -m ruff check .)",
+      "mcp__claude_ai_Linear__get_issue"
     ]
   }
 }

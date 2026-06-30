@@ -61,6 +61,36 @@ function ExpiredBadge() {
   );
 }
 
+// ── Estatus badge for resolved outcomes (Archivo tab) ─────────────────────────
+
+type OutcomeEstatus = "Winner" | "Lost" | "Desestimado";
+
+const OUTCOME_ESTATUS: Record<string, OutcomeEstatus> = {
+  TARGET_HIT: "Winner",
+  STOP_HIT: "Lost",
+  EXPIRED: "Desestimado",
+};
+
+const ESTATUS_STYLES: Record<OutcomeEstatus, { border: string; color: string; bg: string }> = {
+  Winner:       { border: "#22c55e", color: "#22c55e", bg: "rgba(34,197,94,0.10)" },
+  Lost:         { border: "#ef4444", color: "#ef4444", bg: "rgba(239,68,68,0.10)" },
+  Desestimado:  { border: "#6B7280", color: "#6B7280", bg: "rgba(107,114,128,0.10)" },
+};
+
+function EstatusBadge({ outcome }: { outcome: string | null | undefined }) {
+  if (!outcome) return <span className="text-text-muted font-mono text-xs">—</span>;
+  const label = OUTCOME_ESTATUS[outcome] ?? ("Desestimado" as OutcomeEstatus);
+  const s = ESTATUS_STYLES[label];
+  return (
+    <span
+      className="px-2 py-0.5 rounded text-xs font-mono font-bold"
+      style={{ border: `1px solid ${s.border}`, color: s.color, background: s.bg }}
+    >
+      {label}
+    </span>
+  );
+}
+
 function MiniScoreBar({
   score_quant,
   band,
@@ -544,34 +574,42 @@ function SignalTable({
               <span className="text-text-muted">—</span>
             )}
           </td>
-          <td className="px-3 py-0 font-mono">
-            {asset.atr_14_pct == null ? (
-              <span className="text-text-muted">—</span>
-            ) : asset.stop_viable === true ? (
-              <span className="text-gain">✔ ATR</span>
-            ) : asset.stop_viable === false ? (
-              <span className="text-loss">❌ ATR</span>
-            ) : (
-              <span className="text-text-muted">—</span>
-            )}
-          </td>
-          <td className="px-3 py-0">
-            {asset.signal === "BUY" ? (
-              <BetSizeCell
-                gain={asset.expected_gain_per10 ?? null}
-                loss={asset.expected_loss_per10 ?? null}
-                ev={asset.expected_value_per10 ?? null}
-                hrUsed={asset.hit_rate_used ?? null}
-                hrSrc={asset.hit_rate_source ?? null}
-              />
-            ) : (
-              <span className="text-text-muted">—</span>
-            )}
-          </td>
+          {isArchive ? (
+            <td className="px-3 py-0">
+              <EstatusBadge outcome={asset.outcome} />
+            </td>
+          ) : (
+            <>
+              <td className="px-3 py-0 font-mono">
+                {asset.atr_14_pct == null ? (
+                  <span className="text-text-muted">—</span>
+                ) : asset.stop_viable === true ? (
+                  <span className="text-gain">✔ ATR</span>
+                ) : asset.stop_viable === false ? (
+                  <span className="text-loss">❌ ATR</span>
+                ) : (
+                  <span className="text-text-muted">—</span>
+                )}
+              </td>
+              <td className="px-3 py-0">
+                {asset.signal === "BUY" ? (
+                  <BetSizeCell
+                    gain={asset.expected_gain_per10 ?? null}
+                    loss={asset.expected_loss_per10 ?? null}
+                    ev={asset.expected_value_per10 ?? null}
+                    hrUsed={asset.hit_rate_used ?? null}
+                    hrSrc={asset.hit_rate_source ?? null}
+                  />
+                ) : (
+                  <span className="text-text-muted">—</span>
+                )}
+              </td>
+            </>
+          )}
         </tr>
         {isExpanded && (
           <tr key={`${asset.ticker}-breakdown`} className="border-b border-border">
-            <td colSpan={13} className="p-0">
+            <td colSpan={isArchive ? 12 : 13} className="p-0">
               <ScoreBreakdownBar asset={asset} />
               <div className="px-3 pb-2">
                 <TraderChartUpload
@@ -601,8 +639,9 @@ function SignalTable({
           <th className="px-3 py-0 text-label-caps">Stop</th>
           <th className="px-3 py-0 text-label-caps">Señal</th>
           <th className="px-3 py-0 text-label-caps">Freshness</th>
-          <th className="px-3 py-0 text-label-caps">ATR</th>
-          <th className="px-3 py-0 text-label-caps">Bet Size</th>
+          {isArchive && <th className="px-3 py-0 text-label-caps">Estatus</th>}
+          {!isArchive && <th className="px-3 py-0 text-label-caps">ATR</th>}
+          {!isArchive && <th className="px-3 py-0 text-label-caps">Bet Size</th>}
         </tr>
       </thead>
       <tbody>{rows}</tbody>
@@ -633,6 +672,7 @@ export default function OpportunitiesPanel({
   const {
     top5,
     results,
+    outcomes,
     totalAnalyzed,
     status,
     runStatus,
@@ -698,8 +738,15 @@ export default function OpportunitiesPanel({
     status === "error" && runStatus?.stage === "failed" && runStatus.errors_so_far.length > 0;
   const canPreview = (runStatus?.tickers_completed ?? 0) >= 20;
 
-  const activeSignals = results.filter((a) => a.freshness_status !== "expired");
-  const archivedSignals = results.filter((a) => a.freshness_status === "expired");
+  // Oportunidades: only ranked signals from the latest run (non-expired).
+  const rankedSignals = results
+    .filter((a) => a.rank !== null)
+    .sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99));
+  const activeSignals = rankedSignals.filter((a) => a.freshness_status !== "expired");
+
+  // Archivo: all resolved outcomes across all runs, ordered by analyzed_at DESC (from hook).
+  const archivedSignals = outcomes;
+
   const displayedSignals =
     activeTab === "active"
       ? activeSignals.length > 0
@@ -895,7 +942,9 @@ export default function OpportunitiesPanel({
           <button className={tabClass("archive")} onClick={() => setActiveTab("archive")}>
             Archivo
             {archivedSignals.length > 0 && (
-              <span className="ml-1 text-text-muted">({archivedSignals.length})</span>
+              <span className="ml-1 text-text-muted">
+                ({archivedSignals.length})
+              </span>
             )}
           </button>
         </div>
@@ -996,7 +1045,7 @@ export default function OpportunitiesPanel({
             </div>
           ) : activeTab === "archive" && archivedSignals.length === 0 ? (
             <div className="flex items-center justify-center h-full text-text-muted text-sm">
-              No hay señales expiradas en el archivo
+              Sin trades resueltos aún — aparecerán aquí cuando una señal toque su target o stop
             </div>
           ) : (
             <SignalTable
